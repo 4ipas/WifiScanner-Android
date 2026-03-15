@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">WifiScanner</string>
+    <string name="start_scan">Начать сканирование</string>
+    <string name="stop_scan">Завершить сканирование</string>
+    <string name="location_hint">Имя локации (необязательно)</string>
+    <string name="status_stopped">Сканирование остановлено</string>
+    <string name="status_active">Сканирование активно</string>
+    <string name="total_records">Записей: %1$d</string>
+    <string name="service_running">Фоновое сканирование Wi-Fi активно</string>
+    <string name="need_permissions">Для работы приложения необходимы разрешения на геолокацию и файлы</string>
+</resources>

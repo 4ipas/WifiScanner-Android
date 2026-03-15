@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto">
+    <PreferenceCategory app:title="Настройки сканирования">
+        <EditTextPreference
+            app:key="pref_scan_interval"
+            app:title="Интервал фонового сканирования"
+            app:dialogTitle="Интервал сканирования в секундах (1-1440)"
+            app:defaultValue="5" />
+    </PreferenceCategory>
+</PreferenceScreen>
