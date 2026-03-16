@@ -7,11 +7,15 @@ import android.os.Build
 import androidx.core.content.ContextCompat
 
 object PermissionHelper {
-    fun getRequiredPermissions(): Array<String> {
-        val permissions = mutableListOf(
+    fun getBasicLocationPermissions(): Array<String> {
+        return arrayOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION
         )
+    }
+
+    fun getBackgroundPermissions(): Array<String> {
+        val permissions = mutableListOf<String>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             permissions.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
         }
@@ -21,8 +25,8 @@ object PermissionHelper {
         return permissions.toTypedArray()
     }
 
-    fun hasAllPermissions(context: Context): Boolean {
-        return getRequiredPermissions().all {
+    fun hasBasicPermissions(context: Context): Boolean {
+        return getBasicLocationPermissions().all {
             ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
         }
     }

@@ -9,4 +9,9 @@
     <string name="total_records">Записей: %1$d</string>
     <string name="service_running">Фоновое сканирование Wi-Fi активно</string>
     <string name="need_permissions">Для работы приложения необходимы разрешения на геолокацию и файлы</string>
+    <string name="snapshots_count">Слепков: %1$d</string>
+    <string name="records_count">Записей: %1$d</string>
+    <string name="permission_denied_title">Нет доступа к геолокации</string>
+    <string name="permission_denied_desc">Android требует разрешения на местоположение для поиска сетей Wi-Fi. Без них приложение не сможет показать активные сети.</string>
+    <string name="grant_permission">Дать разрешение</string>
 </resources>

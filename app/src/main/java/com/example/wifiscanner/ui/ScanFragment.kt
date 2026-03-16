@@ -54,6 +54,9 @@ class ScanFragment : Fragment() {
         val allGranted = permissions.entries.all { it.value }
         if (!allGranted) {
             showPermissionDeniedDialog()
+        } else {
+            // Permissions granted, we can start the service now
+            executeStartService()
         }
     }
 
@@ -103,12 +106,12 @@ class ScanFragment : Fragment() {
                 }
                 launch {
                     viewModel.totalSnapshots.collect { count ->
-                        tvSnapshots.text = "Слепков: $count"
+                        tvSnapshots.text = getString(R.string.snapshots_count, count)
                     }
                 }
                 launch {
                     viewModel.totalRecords.collect { count ->
-                        tvCount.text = "Записей: $count"
+                        tvCount.text = getString(R.string.records_count, count)
                     }
                 }
                 launch {
@@ -126,15 +129,28 @@ class ScanFragment : Fragment() {
             return
         }
 
-        val permissions = PermissionHelper.getRequiredPermissions()
+        val permissions = PermissionHelper.getBackgroundPermissions()
         val notGranted = permissions.filter {
             ActivityCompat.checkSelfPermission(requireContext(), it) != PackageManager.PERMISSION_GRANTED
         }
+        
         if (notGranted.isNotEmpty()) {
-            showPermissionDeniedDialog()
+            // Explain why we need background location before requesting it
+            AlertDialog.Builder(requireContext())
+                .setTitle("Работа в фоновом режиме")
+                .setMessage("Для непрерывной записи маршрута приложению необходимо разрешение на работу в фоне.\n\nВ следующем диалоге выберите «Разрешать всегда» (Allow all the time).")
+                .setPositiveButton("Понятно") { _, _ ->
+                     permissionLauncher.launch(notGranted.toTypedArray())
+                }
+                .setNegativeButton("Отмена", null)
+                .show()
             return
         }
         
+        executeStartService()
+    }
+
+    private fun executeStartService() {
         val intent = Intent(requireContext(), WifiScanService::class.java)
         val locName = etLocation.text.toString().trim()
         val startTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
@@ -170,8 +186,8 @@ class ScanFragment : Fragment() {
 
     private fun showPermissionDeniedDialog() {
         AlertDialog.Builder(requireContext())
-            .setTitle("Необходимы разрешения")
-            .setMessage("Для работы сканера Wi-Fi требуются разрешения на местоположение, уведомления и доступ к файлам.\n\nПожалуйста, перейдите в настройки приложения и предоставьте их.")
+            .setTitle("Отсутствует разрешение")
+            .setMessage("Без разрешения «Разрешать всегда» (Background Location) фоновое сканирование сетей не запустится или прервется при выключении экрана.\n\nПожалуйста, перейдите в настройки приложения -> Разрешения -> Местоположение -> и выберите «Разрешать всегда».")
             .setPositiveButton("В Настройки") { _, _ ->
                 val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                     data = Uri.fromParts("package", requireContext().packageName, null)

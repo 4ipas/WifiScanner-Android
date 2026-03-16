@@ -2,11 +2,8 @@ package com.example.wifiscanner
 
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Bundle
-import android.provider.Settings
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.viewpager2.widget.ViewPager2
@@ -17,6 +14,10 @@ import com.google.android.material.tabs.TabLayout
 import com.google.android.material.tabs.TabLayoutMediator
 import android.view.Menu
 import android.view.MenuItem
+
+import android.view.View
+import android.widget.Button
+import android.widget.LinearLayout
 
 class MainActivity : AppCompatActivity() {
 
@@ -29,14 +30,17 @@ class MainActivity : AppCompatActivity() {
         if (allGranted) {
             setupTabsOnce()
         } else {
-            showPermissionDeniedDialog()
+            showEmptyState()
         }
     }
-
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        
+        findViewById<Button>(R.id.btnGrantPermission).setOnClickListener {
+            requestPermissions()
+        }
     }
 
     override fun onCreateOptionsMenu(menu: Menu?): Boolean {
@@ -56,9 +60,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
-        if (PermissionHelper.hasAllPermissions(this)) {
+        if (PermissionHelper.hasBasicPermissions(this)) {
             setupTabsOnce()
         } else {
+            showEmptyState()
             requestPermissions()
         }
     }
@@ -66,9 +71,12 @@ class MainActivity : AppCompatActivity() {
     private fun setupTabsOnce() {
         if (isTabsSetup) return
         isTabsSetup = true
+        
+        findViewById<LinearLayout>(R.id.layoutPermissionDenied).visibility = View.GONE
+        val viewPager = findViewById<ViewPager2>(R.id.viewPager)
+        viewPager.visibility = View.VISIBLE
 
         val tabLayout = findViewById<TabLayout>(R.id.tabLayout)
-        val viewPager = findViewById<ViewPager2>(R.id.viewPager)
 
         val adapter = ViewPagerAdapter(this)
         viewPager.adapter = adapter
@@ -82,27 +90,18 @@ class MainActivity : AppCompatActivity() {
         }.attach()
     }
 
+    private fun showEmptyState() {
+        findViewById<LinearLayout>(R.id.layoutPermissionDenied).visibility = View.VISIBLE
+        findViewById<ViewPager2>(R.id.viewPager).visibility = View.GONE
+    }
+
     private fun requestPermissions() {
-        val permissions = PermissionHelper.getRequiredPermissions()
+        val permissions = PermissionHelper.getBasicLocationPermissions()
         val notGranted = permissions.filter {
             ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
         if (notGranted.isNotEmpty()) {
             permissionLauncher.launch(notGranted.toTypedArray())
         }
-    }
-
-    private fun showPermissionDeniedDialog() {
-        AlertDialog.Builder(this)
-            .setTitle("Обязательные разрешения")
-            .setMessage("Для поиска Wi-Fi сетей Android требует доступ к местоположению на аппаратном уровне. Без этого приложение не сможет работать.\n\nПожалуйста, нажмите «В Настройки» -> Разрешения -> Местоположение -> «Разрешать всегда».")
-            .setPositiveButton("В Настройки") { _, _ ->
-                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                    data = Uri.fromParts("package", packageName, null)
-                }
-                startActivity(intent)
-            }
-            .setCancelable(false)
-            .show()
     }
 }
