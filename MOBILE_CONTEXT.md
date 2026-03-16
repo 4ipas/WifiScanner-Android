@@ -13,7 +13,7 @@
 ## 3. Правила разработки (Constraints)
 - **UI:** Для верстки использовать строго `XML Layouts` (уже есть `activity_main.xml`, `item_wifi.xml`, `fragment_view.xml`, `fragment_scan.xml`). Не использовать Jetpack Compose.
 - **Архитектура:** Всю логику взаимодействия с `WifiManager` инкапсулировать на слое репозитория или внутри `WifiViewModel`. Activity должна заниматься только отображением вкладок (`ViewPager2` + `TabLayout`) и запросом прав. Логика разделена по фрагментам: `ViewFragment` и `ScanFragment`.
-- **Ограничения платформы:** Для обхода жесткого троттлинга Wi-Fi сканирования (Wi-Fi Scan Throttling) в Android используется гибридный подход: параллельно с `WifiManager` мы запускаем высокочастотный опрос `LocationManager`, получая пассивные обновления сканирования эфира самой ОС. Это позволяет собирать плотные данные без изменения настроек разработчика. Требуются runtime-доступы: `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`.
+- **Ограничения платформы (Wi-Fi Scan Throttling):** Для обхода системных ограничений на частоту сканирования Wi-Fi (не более 4 раз в 2 минуты) реализован гибридный подход. В фоновой службе (Foreground Service) запускается циклический опрос `WifiManager.scanResults` (раз в 5 сек) совместно с запросом геолокации через компонент `FusedLocationProviderClient` (PRIORITY_HIGH_ACCURACY) от Google Play Services. Это заставляет системные сервисы непрерывно сканировать эфир без лимитов. Подробное техническое обоснование и история исследования проблемы задокументированы в файле `../Исследования/wifi_scanning_evolution.md`. Требуются runtime-доступы: `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`.
 
 ## 4. Основные сущности
 - `WifiScanResult`: Дата-класс, описывающий одну найденную сеть в единицу времени.

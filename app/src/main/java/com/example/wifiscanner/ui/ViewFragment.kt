@@ -61,20 +61,20 @@ class ViewFragment : Fragment() {
 
     @SuppressLint("MissingPermission")
     private fun updateWifiList() {
-        if (!PermissionHelper.hasAllPermissions(requireContext())) return
+        if (!PermissionHelper.hasBasicPermissions(requireContext())) return
 
         @Suppress("DEPRECATION")
         if (wifiManager.isWifiEnabled) {
             wifiManager.startScan()
         }
 
-        val results = try { wifiManager.scanResults } catch (e: Exception) { emptyList() }
+        val results = try { wifiManager.scanResults } catch (_: Exception) { emptyList() }
 
         val mapped = results.map { scanResult ->
             val extractedSsid = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 try {
                     scanResult.wifiSsid?.toString()?.removeSurrounding("\"") ?: ""
-                } catch (e: Exception) {
+                } catch (_: Exception) {
                     @Suppress("DEPRECATION")
                     scanResult.SSID
                 }
