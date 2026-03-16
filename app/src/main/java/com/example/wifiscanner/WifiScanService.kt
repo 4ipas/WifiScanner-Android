@@ -5,21 +5,22 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
-import android.location.Location
-import android.location.LocationListener
-import android.location.LocationManager
 import android.net.wifi.WifiManager
 import android.os.Build
-import android.os.Bundle
 import android.os.IBinder
 import android.os.Looper
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.preference.PreferenceManager
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 import com.example.wifiscanner.models.WifiScanResult
 import com.example.wifiscanner.repository.WifiRepository
 import com.example.wifiscanner.utils.CsvLogger
@@ -31,7 +32,7 @@ import java.util.Locale
 class WifiScanService : Service() {
 
     private lateinit var wifiManager: WifiManager
-    private lateinit var locationManager: LocationManager
+    private lateinit var fusedLocationClient: FusedLocationProviderClient
     private var serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var locationName: String? = null
     private var globalRecordNumber: Long = 0L
@@ -43,22 +44,18 @@ class WifiScanService : Service() {
         const val EXTRA_LOCATION_NAME = "extra_location_name"
     }
 
-    private val locationListener = object : LocationListener {
-        override fun onLocationChanged(location: Location) {
-            // Location changed triggers OS-level Wi-Fi scans under the hood
-            // The BroadcastReceiver will catch the results.
+    private val locationCallback = object : LocationCallback() {
+        override fun onLocationResult(locationResult: LocationResult) {
+            // High accuracy location requests force the OS to scan Wi-Fi
+            // Our separate polling loop catches these fresh results from the OS cache
         }
-        @Deprecated("Deprecated in Java")
-        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
-        override fun onProviderEnabled(provider: String) {}
-        override fun onProviderDisabled(provider: String) {}
     }
 
     @SuppressLint("UnspecifiedRegisterReceiverFlag")
     override fun onCreate() {
         super.onCreate()
         wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-        locationManager = applicationContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this)
         createNotificationChannel()
     }
@@ -90,27 +87,16 @@ class WifiScanService : Service() {
     @SuppressLint("MissingPermission")
     private fun startPassiveLocationScanning() {
         try {
-            // Request frequent location updates to trick the OS into scanning Wi-Fi
-            // to improve location accuracy (works with Wi-Fi scanning enabled in OS settings)
-            val providers = locationManager.getProviders(true)
-            if (providers.contains(LocationManager.NETWORK_PROVIDER)) {
-                locationManager.requestLocationUpdates(
-                    LocationManager.NETWORK_PROVIDER,
-                    5000L, // 5 seconds
-                    0f,
-                    locationListener,
-                    Looper.getMainLooper()
-                )
-            }
-            if (providers.contains(LocationManager.GPS_PROVIDER)) {
-                locationManager.requestLocationUpdates(
-                    LocationManager.GPS_PROVIDER,
-                    5000L, // 5 seconds
-                    0f,
-                    locationListener,
-                    Looper.getMainLooper()
-                )
-            }
+            val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000L).apply {
+                setMinUpdateIntervalMillis(5000L)
+                setMaxUpdateDelayMillis(5000L)
+            }.build()
+
+            fusedLocationClient.requestLocationUpdates(
+                locationRequest,
+                locationCallback,
+                Looper.getMainLooper()
+            )
         } catch (e: SecurityException) {
             e.printStackTrace()
         }
@@ -161,7 +147,7 @@ class WifiScanService : Service() {
                 val extractedSsid = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     try {
                         scanResult.wifiSsid?.toString()?.removeSurrounding("\"") ?: ""
-                    } catch (e: Exception) {
+                    } catch (_: Exception) {
                         @Suppress("DEPRECATION")
                         scanResult.SSID
                     }
@@ -173,7 +159,7 @@ class WifiScanService : Service() {
                 WifiScanResult(
                     locationName = locationName,
                     timestamp = timestampStr,
-                    mac = scanResult.BSSID ?: "",
+                    mac = scanResult.BSSID,
                     rssi = scanResult.level,
                     ssid = extractedSsid ?: "",
                     frequency = scanResult.frequency,
@@ -197,7 +183,7 @@ class WifiScanService : Service() {
         super.onDestroy()
         serviceScope.cancel()
         try {
-            locationManager.removeUpdates(locationListener)
+            fusedLocationClient.removeLocationUpdates(locationCallback)
         } catch (e: Exception) {
             e.printStackTrace()
         }
