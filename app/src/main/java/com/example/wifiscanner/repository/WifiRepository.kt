@@ -1,12 +1,20 @@
 package com.example.wifiscanner.repository
 
+import com.example.wifiscanner.models.NodeDTO
 import com.example.wifiscanner.models.ScanSession
 import com.example.wifiscanner.models.WifiScanResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.Stack
 
 object WifiRepository {
+    var rootNode: NodeDTO? = null
+    val navStack = Stack<NodeDTO>()
+    var currentTaskCsvFilename: String = "wifi_tasks_default.csv"
+    var activeScanNode: NodeDTO? = null
+    var pendingScanNode: NodeDTO? = null
+
     private val _scanResults = MutableStateFlow<List<WifiScanResult>>(emptyList())
     val scanResults: StateFlow<List<WifiScanResult>> = _scanResults.asStateFlow()
 

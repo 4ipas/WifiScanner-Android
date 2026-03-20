@@ -85,6 +85,7 @@ class MainActivity : AppCompatActivity() {
             tab.text = when (position) {
                 0 -> "Текущие сети"
                 1 -> "Запись"
+                2 -> "Задания"
                 else -> ""
             }
         }.attach()

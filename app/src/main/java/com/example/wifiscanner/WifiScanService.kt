@@ -35,6 +35,12 @@ class WifiScanService : Service() {
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private var serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var locationName: String? = null
+    private var requiredScans: Int? = null
+    private var isTaskMode: Boolean = false
+    private var nodeIdString: String = ""
+    private var addressString: String = ""
+    private var entranceString: String = ""
+    private var floorString: String = ""
     private var globalRecordNumber: Long = 0L
     private var lastMaxTimestamp: Long = 0L
     private lateinit var sharedPreferences: SharedPreferences
@@ -42,6 +48,12 @@ class WifiScanService : Service() {
     companion object {
         const val CHANNEL_ID = "WifiScanChannel"
         const val EXTRA_LOCATION_NAME = "extra_location_name"
+        const val EXTRA_REQUIRED_SCANS = "extra_required_scans"
+        const val EXTRA_IS_TASK = "extra_is_task"
+        const val EXTRA_NODE_ID = "extra_node_id"
+        const val EXTRA_ADDRESS = "extra_address"
+        const val EXTRA_ENTRANCE = "extra_entrance"
+        const val EXTRA_FLOOR = "extra_floor"
     }
 
     private val locationCallback = object : LocationCallback() {
@@ -62,6 +74,19 @@ class WifiScanService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         locationName = intent?.getStringExtra(EXTRA_LOCATION_NAME)
+        isTaskMode = intent?.getBooleanExtra(EXTRA_IS_TASK, false) ?: false
+        if (isTaskMode) {
+            nodeIdString = intent?.getStringExtra(EXTRA_NODE_ID) ?: ""
+            addressString = intent?.getStringExtra(EXTRA_ADDRESS) ?: ""
+            entranceString = intent?.getStringExtra(EXTRA_ENTRANCE) ?: ""
+            floorString = intent?.getStringExtra(EXTRA_FLOOR) ?: ""
+        }
+        
+        if (intent?.hasExtra(EXTRA_REQUIRED_SCANS) == true) {
+            requiredScans = intent.getIntExtra(EXTRA_REQUIRED_SCANS, 5)
+        } else {
+            requiredScans = null
+        }
         
         val notificationIntent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
@@ -138,44 +163,52 @@ class WifiScanService : Service() {
             }
             lastMaxTimestamp = currentMaxTimestamp
             
-            val timestampStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
-            
-            val mappedResults = results.map { scanResult ->
+            val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+            val currentBatchTimeStr = sdf.format(Date())
+
+            val mappedResults = results.map { result ->
                 globalRecordNumber++
                 
-                // Safe SSID extraction logic
-                val extractedSsid = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    try {
-                        scanResult.wifiSsid?.toString()?.removeSurrounding("\"") ?: ""
-                    } catch (_: Exception) {
-                        @Suppress("DEPRECATION")
-                        scanResult.SSID
-                    }
-                } else {
-                    @Suppress("DEPRECATION")
-                    scanResult.SSID
-                }
-                
                 WifiScanResult(
+                    nodeId = if (isTaskMode) nodeIdString else null,
+                    address = if (isTaskMode) addressString else null,
+                    entrance = if (isTaskMode) entranceString else null,
+                    floor = if (isTaskMode) floorString else null,
                     locationName = locationName,
-                    timestamp = timestampStr,
-                    mac = scanResult.BSSID,
-                    rssi = scanResult.level,
-                    ssid = extractedSsid ?: "",
-                    frequency = scanResult.frequency,
+                    timestamp = currentBatchTimeStr,
+                    mac = result.BSSID,
+                    rssi = result.level,
+                    ssid = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        result.wifiSsid?.toString()?.removeSurrounding("\"") ?: ""
+                    } else {
+                        @Suppress("DEPRECATION")
+                        result.SSID
+                    },
+                    frequency = result.frequency,
                     recordNumber = globalRecordNumber
                 )
-            }
+            }.sortedByDescending { it.rssi }
 
-            // Save to CSV
-            CsvLogger.logResults(mappedResults)
-            
+            if (mappedResults.isNotEmpty()) {
+                if (isTaskMode) {
+                    CsvLogger.logTasksResults(WifiRepository.currentTaskCsvFilename, mappedResults)
+                } else {
+                    CsvLogger.logResults(mappedResults)
+                }
+            }
             // Update Repository UI
-            WifiRepository.incrementSnapshot()
             WifiRepository.incrementRecords(mappedResults.size)
+            WifiRepository.incrementSnapshot()
             
             // Limit viewable results memory
-            WifiRepository.updateResults(mappedResults.sortedByDescending { it.rssi }.take(20))
+            WifiRepository.updateResults(mappedResults.take(20))
+            
+            val req = requiredScans
+            if (req != null && WifiRepository.totalSnapshots.value >= req) {
+                val endTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                WifiRepository.stopSession(endTime)
+                stopSelf() // Automatically kill Android Background Service!
+            }
         }
     }
 

@@ -50,4 +50,7 @@ dependencies {
     implementation("androidx.recyclerview:recyclerview:1.3.2")
     implementation("androidx.preference:preference-ktx:1.2.1")
     implementation("com.google.android.gms:play-services-location:21.2.0")
+    
+    // JSON parsing
+    implementation("com.google.code.gson:gson:2.10.1")
 }
