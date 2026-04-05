@@ -3,6 +3,7 @@ package com.example.wifiscanner.repository
 import com.example.wifiscanner.models.NodeDTO
 import com.example.wifiscanner.models.ScanSession
 import com.example.wifiscanner.models.WifiScanResult
+import com.example.wifiscanner.utils.SensorSnapshot
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,6 +30,13 @@ object WifiRepository {
     
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
+
+    // v3.0.0: Данные датчиков для UI
+    private val _sensorSnapshot = MutableStateFlow<SensorSnapshot?>(null)
+    val sensorSnapshot: StateFlow<SensorSnapshot?> = _sensorSnapshot.asStateFlow()
+
+    private val _lastLocation = MutableStateFlow<Pair<Double, Double>?>(null)
+    val lastLocation: StateFlow<Pair<Double, Double>?> = _lastLocation.asStateFlow()
 
     private var currentSessionId = 0
     private var currentSessionStartTime = ""
@@ -74,5 +82,14 @@ object WifiRepository {
 
     fun setScanning(scanning: Boolean) {
         _isScanning.value = scanning
+    }
+
+    // v3.0.0: Обновление данных датчиков для UI
+    fun updateSensorSnapshot(snapshot: SensorSnapshot) {
+        _sensorSnapshot.value = snapshot
+    }
+
+    fun updateLocation(latitude: Double, longitude: Double) {
+        _lastLocation.value = Pair(latitude, longitude)
     }
 }

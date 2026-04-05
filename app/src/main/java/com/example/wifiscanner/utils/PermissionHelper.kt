@@ -8,10 +8,14 @@ import androidx.core.content.ContextCompat
 
 object PermissionHelper {
     fun getBasicLocationPermissions(): Array<String> {
-        return arrayOf(
+        val permissions = mutableListOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION
         )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            permissions.add(Manifest.permission.ACTIVITY_RECOGNITION)
+        }
+        return permissions.toTypedArray()
     }
 
     fun getBackgroundPermissions(): Array<String> {

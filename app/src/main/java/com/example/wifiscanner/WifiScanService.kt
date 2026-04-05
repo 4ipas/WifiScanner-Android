@@ -8,10 +8,13 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.ServiceInfo
+import android.location.Location
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.preference.PreferenceManager
@@ -24,6 +27,8 @@ import com.google.android.gms.location.Priority
 import com.example.wifiscanner.models.WifiScanResult
 import com.example.wifiscanner.repository.WifiRepository
 import com.example.wifiscanner.utils.CsvLogger
+import com.example.wifiscanner.utils.SensorCollector
+import com.example.wifiscanner.utils.frequencyToChannel
 import kotlinx.coroutines.*
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -33,6 +38,7 @@ class WifiScanService : Service() {
 
     private lateinit var wifiManager: WifiManager
     private lateinit var fusedLocationClient: FusedLocationProviderClient
+    private lateinit var sensorCollector: SensorCollector
     private var serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var locationName: String? = null
     private var requiredScans: Int? = null
@@ -44,6 +50,13 @@ class WifiScanService : Service() {
     private var globalRecordNumber: Long = 0L
     private var lastMaxTimestamp: Long = 0L
     private lateinit var sharedPreferences: SharedPreferences
+
+    // v3.0.0: Кэшированные GPS-координаты
+    private var cachedLatitude: Double? = null
+    private var cachedLongitude: Double? = null
+
+    // v3.0.0: Имя файла для ручной записи (уникально для каждой сессии)
+    private var manualScanFileName: String = ""
 
     companion object {
         const val CHANNEL_ID = "WifiScanChannel"
@@ -60,6 +73,11 @@ class WifiScanService : Service() {
         override fun onLocationResult(locationResult: LocationResult) {
             // High accuracy location requests force the OS to scan Wi-Fi
             // Our separate polling loop catches these fresh results from the OS cache
+            // v3.0.0: Кэшируем последние GPS-координаты
+            locationResult.lastLocation?.let { location ->
+                cachedLatitude = location.latitude
+                cachedLongitude = location.longitude
+            }
         }
     }
 
@@ -69,7 +87,15 @@ class WifiScanService : Service() {
         wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this)
+
+        // v3.0.0: Инициализация сборщика IMU-сенсоров
+        sensorCollector = SensorCollector(applicationContext)
+        sensorCollector.start()
+
         createNotificationChannel()
+
+        // v3.0.0: Попробовать получить начальные GPS-координаты
+        fetchInitialLocation()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -80,6 +106,10 @@ class WifiScanService : Service() {
             addressString = intent?.getStringExtra(EXTRA_ADDRESS) ?: ""
             entranceString = intent?.getStringExtra(EXTRA_ENTRANCE) ?: ""
             floorString = intent?.getStringExtra(EXTRA_FLOOR) ?: ""
+        } else {
+            // Генерируем уникальное имя файла для ручного режима: wifi_scan_ddMMyyyy_HH-mm-ss.csv
+            val timestamp = SimpleDateFormat("ddMMyyyy_HH-mm-ss", Locale.US).format(Date())
+            manualScanFileName = "wifi_scan_$timestamp.csv"
         }
         
         if (intent?.hasExtra(EXTRA_REQUIRED_SCANS) == true) {
@@ -100,7 +130,18 @@ class WifiScanService : Service() {
             .setContentIntent(pendingIntent)
             .build()
 
-        startForeground(1, notification)
+        // На Android 14+ тип HEALTH позволяет работать шагомеру в фоне
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION or ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH
+            } else {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            }
+            startForeground(1, notification, type)
+        } else {
+            startForeground(1, notification)
+        }
+
         WifiRepository.setScanning(true)
 
         startPassiveLocationScanning()
@@ -127,8 +168,31 @@ class WifiScanService : Service() {
         }
     }
 
+    /**
+     * v3.0.0: Получить начальные GPS-координаты при старте сервиса.
+     */
+    @SuppressLint("MissingPermission")
+    private fun fetchInitialLocation() {
+        try {
+            fusedLocationClient.lastLocation.addOnSuccessListener { location: Location? ->
+                location?.let {
+                    cachedLatitude = it.latitude
+                    cachedLongitude = it.longitude
+                }
+            }
+        } catch (e: SecurityException) {
+            e.printStackTrace()
+        }
+    }
+
     private fun startScanningLoop() {
         serviceScope.launch {
+            // v3.0.0: Охлаждение/Прогрев перед первым сканом (для стабилизации сборщика и ОС)
+            val cooldownSeconds = sharedPreferences.getString("pref_scan_cooldown", "5")?.toLongOrNull() ?: 5L
+            if (cooldownSeconds > 0) {
+                delay(cooldownSeconds * 1000L)
+            }
+
             while (isActive) {
                 if (wifiManager.isWifiEnabled) {
                     @Suppress("DEPRECATION")
@@ -166,9 +230,23 @@ class WifiScanService : Service() {
             val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
             val currentBatchTimeStr = sdf.format(Date())
 
-            val mappedResults = results.map { result ->
+            // v3.0.0: Снимок сенсоров (один на весь батч — все сети получат одинаковые PDR-данные)
+            val sensorSnapshot = sensorCollector.getSnapshot()
+
+            // v3.0.0: Текущее смещение для конвертации boot-time в wall-clock
+            val wallClockOffsetMs = System.currentTimeMillis() - (SystemClock.elapsedRealtimeNanos() / 1_000_000)
+
+            // Сначала сортируем по RSSI по убыванию, чтобы самые сильные сети получали первые RecordNumber
+            val sortedResults = results.sortedByDescending { it.level }
+            val netTimeFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+
+            val mappedResults = sortedResults.map { result ->
                 globalRecordNumber++
                 
+                // v3.0.0: Конвертация ScanResult.timestamp (мкс boot-time) в мс wall-clock
+                val networkWallClockMs = wallClockOffsetMs + (result.timestamp / 1000)
+                val networkTimestampStr = netTimeFormat.format(Date(networkWallClockMs))
+
                 WifiScanResult(
                     nodeId = if (isTaskMode) nodeIdString else null,
                     address = if (isTaskMode) addressString else null,
@@ -185,21 +263,40 @@ class WifiScanService : Service() {
                         result.SSID
                     },
                     frequency = result.frequency,
-                    recordNumber = globalRecordNumber
+                    recordNumber = globalRecordNumber,
+                    // v3.0.0: Новые поля
+                    channel = frequencyToChannel(result.frequency),
+                    networkTimestamp = networkTimestampStr,
+                    latitude = cachedLatitude,
+                    longitude = cachedLongitude,
+                    stepsDelta = sensorSnapshot.stepsDelta,
+                    stepsTotal = sensorSnapshot.stepsTotal,
+                    azimuth = sensorSnapshot.azimuth,
+                    azimuthConfidence = sensorSnapshot.azimuthConfidence,
+                    deviceOrientation = sensorSnapshot.deviceOrientation
                 )
-            }.sortedByDescending { it.rssi }
+            }
 
             if (mappedResults.isNotEmpty()) {
                 if (isTaskMode) {
                     CsvLogger.logTasksResults(WifiRepository.currentTaskCsvFilename, mappedResults)
                 } else {
-                    CsvLogger.logResults(mappedResults)
+                    // Используем уникальное имя файла с временной меткой
+                    CsvLogger.logResults(manualScanFileName, mappedResults)
                 }
             }
             // Update Repository UI
             WifiRepository.incrementRecords(mappedResults.size)
             WifiRepository.incrementSnapshot()
             
+            // v3.0.0: Обновить данные датчиков для отображения в UI
+            WifiRepository.updateSensorSnapshot(sensorSnapshot)
+            cachedLatitude?.let { lat ->
+                cachedLongitude?.let { lon ->
+                    WifiRepository.updateLocation(lat, lon)
+                }
+            }
+
             // Limit viewable results memory
             WifiRepository.updateResults(mappedResults.take(20))
             
@@ -215,6 +312,10 @@ class WifiScanService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         serviceScope.cancel()
+
+        // v3.0.0: Остановить сбор IMU-данных
+        sensorCollector.stop()
+
         try {
             fusedLocationClient.removeLocationUpdates(locationCallback)
         } catch (e: Exception) {

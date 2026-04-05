@@ -15,6 +15,7 @@
     <!-- Foreground Service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
     
     <!-- File Storage permissions -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" 
@@ -24,6 +25,9 @@
         
     <!-- Notifications (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    
+    <!-- Physical Activity (for Step Counter) -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
 
     <application
         android:allowBackup="true"
@@ -45,10 +49,11 @@
             android:label="Настройки"
             android:parentActivityName=".MainActivity" />
 
-        <!-- Фоновая служба для постоянного сканирования -->  <service
+        <!-- Фоновая служба для постоянного сканирования -->
+        <service
             android:name=".WifiScanService"
             android:exported="false"
-            android:foregroundServiceType="location" />
+            android:foregroundServiceType="location|health" />
     </application>
 
 </manifest>

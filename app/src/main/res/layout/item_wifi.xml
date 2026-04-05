@@ -33,8 +33,17 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:textSize="14sp"
-            android:layout_marginEnd="16dp"
+            android:layout_marginEnd="8dp"
             tools:text="2412 MHz" />
+
+        <TextView
+            android:id="@+id/tvChannel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="14sp"
+            android:textColor="?android:attr/textColorSecondary"
+            android:layout_marginEnd="16dp"
+            tools:text="Ch:1" />
 
         <TextView
             android:id="@+id/tvRssi"

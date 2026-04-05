@@ -54,8 +54,8 @@ class TasksFragment : Fragment() {
     private lateinit var btnSaveTasks: Button
     private lateinit var tvBreadcrumbs: TextView
     private lateinit var rvTasks: RecyclerView
-    private lateinit var fabAddLocation: ExtendedFloatingActionButton
-    private lateinit var fabNextLevel: FloatingActionButton
+    private lateinit var btnAddLocation: ImageButton
+    private lateinit var fabNextLevel: ExtendedFloatingActionButton
     
     private lateinit var adapter: TaskNodeAdapter
     
@@ -105,7 +105,7 @@ class TasksFragment : Fragment() {
         btnSaveTasks = view.findViewById(R.id.btnSaveTasks)
         tvBreadcrumbs = view.findViewById(R.id.tvBreadcrumbs)
         rvTasks = view.findViewById(R.id.rvTasks)
-        fabAddLocation = view.findViewById(R.id.fabAddLocation)
+        btnAddLocation = view.findViewById(R.id.btnAddLocation)
         fabNextLevel = view.findViewById(R.id.fabNextLevel)
         
         rvTasks.layoutManager = LinearLayoutManager(requireContext())
@@ -135,7 +135,7 @@ class TasksFragment : Fragment() {
             goBack()
         }
         
-        fabAddLocation.setOnClickListener {
+        btnAddLocation.setOnClickListener {
             showAddLocationDialog()
         }
 
@@ -164,8 +164,7 @@ class TasksFragment : Fragment() {
                                     stopWifiScanService()
                                     activeScanNode = null
                                     Toast.makeText(requireContext(), "Локация завершена!", Toast.LENGTH_SHORT).show()
-                                    val idx = adapter.currentList.indexOf(node)
-                                    if (idx >= 0) adapter.notifyItemChanged(idx)
+                                    adapter.notifyDataSetChanged()
                                     checkLevelCompletion()
                                 }
                             } else {
@@ -238,7 +237,7 @@ class TasksFragment : Fragment() {
             btnLoadTasks.visibility = View.VISIBLE
             btnSaveTasks.visibility = View.GONE
             adapter.submitList(emptyList())
-            fabAddLocation.visibility = View.GONE
+            btnAddLocation.visibility = View.GONE
             return
         }
         
@@ -248,7 +247,7 @@ class TasksFragment : Fragment() {
             btnLoadTasks.visibility = View.VISIBLE
             btnSaveTasks.visibility = View.VISIBLE
             adapter.submitList(listOf(rootNode!!))
-            fabAddLocation.visibility = View.GONE
+            btnAddLocation.visibility = View.GONE
         } else {
             val current = navStack.peek()
             val path = navStack.joinToString(" > ") { it.name }
@@ -261,9 +260,9 @@ class TasksFragment : Fragment() {
             adapter.submitList(newList)
             
             if (current.nodeType == "FLOOR") {
-                fabAddLocation.visibility = View.VISIBLE
+                btnAddLocation.visibility = View.VISIBLE
             } else {
-                fabAddLocation.visibility = View.GONE
+                btnAddLocation.visibility = View.GONE
             }
             
             checkLevelCompletion()
@@ -321,7 +320,7 @@ class TasksFragment : Fragment() {
         val task = node.tasks.firstOrNull()
         if (task != null) {
             task.status = "IN_PROGRESS_0"
-            adapter.notifyItemChanged(adapter.currentList.indexOf(node))
+            adapter.notifyDataSetChanged()
         }
         activeScanNode = node
         
@@ -368,7 +367,7 @@ class TasksFragment : Fragment() {
         val task = node.tasks.firstOrNull()
         if (task != null) {
             task.status = "PENDING"
-            adapter.notifyItemChanged(adapter.currentList.indexOf(node))
+            adapter.notifyDataSetChanged()
         }
         Toast.makeText(requireContext(), "Запись отменена, данные удалены", Toast.LENGTH_SHORT).show()
     }
@@ -402,7 +401,7 @@ class TasksFragment : Fragment() {
                     val task = node.tasks.firstOrNull()
                     if (task != null) {
                         task.status = "PENDING"
-                        adapter.notifyItemChanged(adapter.currentList.indexOf(node))
+                        adapter.notifyDataSetChanged()
                         checkLevelCompletion()
                     }
                     Toast.makeText(requireContext(), "Данные локации стерты", Toast.LENGTH_SHORT).show()

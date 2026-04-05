@@ -9,4 +9,8 @@ class WifiViewModel : ViewModel() {
     val totalSnapshots = WifiRepository.totalSnapshots
     val sessionHistory = WifiRepository.sessionHistory
     val isScanning = WifiRepository.isScanning
+
+    // v3.0.0: Данные датчиков для UI
+    val sensorSnapshot = WifiRepository.sensorSnapshot
+    val lastLocation = WifiRepository.lastLocation
 }

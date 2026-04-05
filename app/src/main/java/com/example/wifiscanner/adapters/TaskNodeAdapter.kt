@@ -34,7 +34,6 @@ class TaskNodeAdapter(
         private val tvNodeName: TextView = itemView.findViewById(R.id.tvNodeName)
         private val tvNodeStatus: TextView = itemView.findViewById(R.id.tvNodeStatus)
         private val btnMenu: ImageButton = itemView.findViewById(R.id.btnMenu)
-        private val layoutActions: LinearLayout = itemView.findViewById(R.id.layoutActions)
         private val btnActionStart: Button = itemView.findViewById(R.id.btnActionStart)
         private val btnActionCancel: Button = itemView.findViewById(R.id.btnActionCancel)
         
@@ -45,7 +44,8 @@ class TaskNodeAdapter(
             
             // Default setup
             btnMenu.visibility = View.GONE
-            layoutActions.visibility = View.GONE
+            btnActionStart.visibility = View.GONE
+            btnActionCancel.visibility = View.GONE
             
             itemView.setOnClickListener { onNodeClick(node) }
 
@@ -63,6 +63,8 @@ class TaskNodeAdapter(
                 "LOCATION" -> {
                     btnMenu.visibility = View.VISIBLE
                     
+                    val hasActiveScan = currentList.any { it.nodeType == "LOCATION" && it.tasks.firstOrNull()?.status?.startsWith("IN_PROGRESS") == true }
+                    
                     val task = node.tasks.firstOrNull()
                     val required = task?.requiredScans ?: 5
                     val status = task?.status ?: "PENDING"
@@ -74,25 +76,25 @@ class TaskNodeAdapter(
                         }
                         tvNodeStatus.text = "Завершено ($required/$required)$recordsText"
                         tvNodeStatus.setTextColor(android.graphics.Color.parseColor("#388E3C"))
-                        layoutActions.visibility = View.GONE
+                        btnActionStart.visibility = View.GONE
+                        btnActionCancel.visibility = View.GONE
                     } else if (status == "SKIPPED") {
                         tvNodeStatus.text = "Отсутствует (Пропущено)"
                         tvNodeStatus.setTextColor(defaultStatusColor)
-                        layoutActions.visibility = View.GONE
+                        btnActionStart.visibility = View.GONE
+                        btnActionCancel.visibility = View.GONE
                     } else if (status.startsWith("IN_PROGRESS")) {
                         val parts = status.split("_")
                         val progress = parts.getOrNull(2)?.toIntOrNull() ?: 0
                         val records = parts.getOrNull(3)?.toIntOrNull() ?: 0
-                        tvNodeStatus.text = "В процессе... ($progress/$required) | Записей: $records"
+                        tvNodeStatus.text = "В процессе ($progress/$required)\nЗаписей: $records"
                         tvNodeStatus.setTextColor(android.graphics.Color.parseColor("#F57C00"))
-                        layoutActions.visibility = View.VISIBLE
                         btnActionStart.visibility = View.GONE
                         btnActionCancel.visibility = View.VISIBLE
                     } else {
                         tvNodeStatus.text = "Ожидает (0/$required)"
                         tvNodeStatus.setTextColor(defaultStatusColor)
-                        layoutActions.visibility = View.VISIBLE
-                        btnActionStart.visibility = View.VISIBLE
+                        btnActionStart.visibility = if (hasActiveScan) View.GONE else View.VISIBLE
                         btnActionCancel.visibility = View.GONE
                     }
                     

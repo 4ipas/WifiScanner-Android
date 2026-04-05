@@ -10,6 +10,8 @@ import androidx.recyclerview.widget.RecyclerView
 import com.example.wifiscanner.R
 import com.example.wifiscanner.models.WifiScanResult
 
+import com.example.wifiscanner.utils.frequencyToChannel
+
 class WifiListAdapter : ListAdapter<WifiScanResult, WifiListAdapter.WifiViewHolder>(WifiDiffCallback()) {
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): WifiViewHolder {
@@ -25,12 +27,15 @@ class WifiListAdapter : ListAdapter<WifiScanResult, WifiListAdapter.WifiViewHold
         private val tvSsid: TextView = itemView.findViewById(R.id.tvSsid)
         private val tvMac: TextView = itemView.findViewById(R.id.tvMac)
         private val tvFreq: TextView = itemView.findViewById(R.id.tvFreq)
+        private val tvChannel: TextView = itemView.findViewById(R.id.tvChannel)
         private val tvRssi: TextView = itemView.findViewById(R.id.tvRssi)
 
         fun bind(result: WifiScanResult) {
             tvSsid.text = if (result.ssid.isNullOrEmpty()) "<Hidden SSID>" else result.ssid
             tvMac.text = result.mac
             tvFreq.text = "${result.frequency} MHz"
+            val ch = if (result.channel > 0) result.channel else frequencyToChannel(result.frequency)
+            tvChannel.text = "Ch:$ch"
             tvRssi.text = "${result.rssi} dBm"
         }
     }

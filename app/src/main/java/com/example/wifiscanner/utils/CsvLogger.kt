@@ -1,6 +1,7 @@
 package com.example.wifiscanner.utils
 
 import android.os.Environment
+import android.util.Log
 import com.example.wifiscanner.models.WifiScanResult
 import java.io.File
 import java.io.FileWriter
@@ -9,12 +10,13 @@ import java.util.Date
 import java.util.Locale
 
 object CsvLogger {
+    private const val TAG = "CsvLogger"
     private const val DIR_NAME = "MyWifiScans"
-    private const val HEADER = "LocationName;Timestamp;MAC;RSSI;SSID;Frequency;RecordNumber\n"
-    private const val TASKS_HEADER = "Timestamp;NodeId;Address;Entrance;Floor;LocationName;SSID;MAC;RSSI;Frequency;RecordNumber\n"
+    private const val HEADER = "LocationName;Timestamp;MAC;RSSI;SSID;Frequency;RecordNumber;Channel;NetworkTimestamp;Latitude;Longitude;StepsDelta;StepsTotal;Azimuth;AzimuthConfidence;DeviceOrientation\n"
+    private const val TASKS_HEADER = "Timestamp;NodeId;Address;Entrance;Floor;LocationName;SSID;MAC;RSSI;Frequency;RecordNumber;Channel;NetworkTimestamp;Latitude;Longitude;StepsDelta;StepsTotal;Azimuth;AzimuthConfidence;DeviceOrientation\n"
 
     @Synchronized
-    fun logResults(results: List<WifiScanResult>) {
+    fun logResults(fileName: String, results: List<WifiScanResult>) {
         if (results.isEmpty()) return
         
         // Use standard Documents directory
@@ -23,11 +25,7 @@ object CsvLogger {
             dir.mkdirs()
         }
 
-        val location = results.first().locationName ?: "unknown"
-        val safeLocation = location.replace("/", "_").replace("\\", "_").replace(";", ",")
-        val fileName = "wifi_scan_$safeLocation.csv"
         val file = File(dir, fileName)
-        
         val isNewFile = !file.exists()
 
         try {
@@ -45,11 +43,14 @@ object CsvLogger {
                                "${result.rssi};" +
                                "$safeSsid;" +
                                "${result.frequency};" +
-                               "${result.recordNumber}\n"
+                               "${result.recordNumber};" +
+                               formatNewColumns(result)
                     writer.append(line)
                 }
             }
+            Log.d(TAG, "Wrote ${results.size} results to ${file.absolutePath}")
         } catch (e: Exception) {
+            Log.e(TAG, "FAILED to write CSV: ${file.absolutePath}", e)
             e.printStackTrace()
         }
     }
@@ -99,7 +100,8 @@ object CsvLogger {
                                "${result.mac};" +
                                "${result.rssi};" +
                                "${result.frequency};" +
-                               "${result.recordNumber}\n"
+                               "${result.recordNumber};" +
+                               formatNewColumns(result)
                     writer.append(line)
                 }
             }
@@ -128,5 +130,27 @@ object CsvLogger {
         } catch (e: Exception) {
             e.printStackTrace()
         }
+    }
+
+    /**
+     * Форматирует 9 новых столбцов v3.0.0 в строку CSV.
+     * Nullable поля записываются как пустые строки.
+     * GPS: 6 знаков после запятой. Azimuth: 1 знак.
+     */
+    private fun formatNewColumns(result: WifiScanResult): String {
+        val lat = result.latitude?.let { String.format(java.util.Locale.US, "%.7f", it) } ?: ""
+        val lon = result.longitude?.let { String.format(java.util.Locale.US, "%.7f", it) } ?: ""
+        val stepsDelta = result.stepsDelta?.toString() ?: ""
+        val stepsTotal = result.stepsTotal?.toString() ?: ""
+        val azimuth = result.azimuth?.let { String.format("%.1f", it) } ?: ""
+        val azimuthConf = result.azimuthConfidence?.let { String.format("%.1f", it) } ?: ""
+        val orientation = result.deviceOrientation ?: ""
+
+        return "${result.channel};" +
+               "${result.networkTimestamp};" +
+               "$lat;$lon;" +
+               "$stepsDelta;$stepsTotal;" +
+               "$azimuth;$azimuthConf;" +
+               "$orientation\n"
     }
 }

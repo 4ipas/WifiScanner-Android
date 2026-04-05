@@ -30,29 +30,36 @@ class SettingsActivity : AppCompatActivity() {
         override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
             setPreferencesFromResource(R.xml.preferences, rootKey)
             
-            val intervalPref: EditTextPreference? = findPreference("pref_scan_interval")
-            intervalPref?.setOnBindEditTextListener { editText ->
-                editText.inputType = InputType.TYPE_CLASS_NUMBER
-            }
+            val intervalPref: RightValuePreference? = findPreference("pref_scan_interval")
+            val cooldownPref: RightValuePreference? = findPreference("pref_scan_cooldown")
             
-            intervalPref?.summaryProvider = EditTextPreference.SimpleSummaryProvider.getInstance()
-            
-            intervalPref?.setOnPreferenceChangeListener { _, newValue ->
-                val stringValue = newValue.toString()
-                if (stringValue.isEmpty()) return@setOnPreferenceChangeListener false
+            val bindNumbers = { pref: RightValuePreference? ->
+                pref?.setOnBindEditTextListener { editText ->
+                    editText.inputType = InputType.TYPE_CLASS_NUMBER
+                }
                 
-                try {
-                    val value = stringValue.toInt()
-                    if (value in 1..1440) {
-                        return@setOnPreferenceChangeListener true
-                    } else {
-                        Toast.makeText(requireContext(), "Значение должно быть от 1 до 1440", Toast.LENGTH_SHORT).show()
+                pref?.setOnPreferenceChangeListener { _, newValue ->
+                    val stringValue = newValue.toString()
+                    if (stringValue.isEmpty()) return@setOnPreferenceChangeListener false
+                    
+                    try {
+                        val value = stringValue.toInt()
+                        if (value in 1..1440) {
+                            // Обязательно оповещаем адаптер кастомной View, что текст изменился
+                            pref.text = stringValue
+                            return@setOnPreferenceChangeListener true
+                        } else {
+                            Toast.makeText(requireContext(), "Значение должно быть от 1 до 1440", Toast.LENGTH_SHORT).show()
+                            return@setOnPreferenceChangeListener false
+                        }
+                    } catch (e: NumberFormatException) {
                         return@setOnPreferenceChangeListener false
                     }
-                } catch (e: NumberFormatException) {
-                    return@setOnPreferenceChangeListener false
                 }
             }
+            
+            bindNumbers(intervalPref)
+            bindNumbers(cooldownPref)
         }
     }
 }

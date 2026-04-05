@@ -45,6 +45,12 @@ class ScanFragment : Fragment() {
     private lateinit var tvSnapshots: TextView
     private lateinit var tvCount: TextView
     private lateinit var rvHistory: RecyclerView
+
+    // v3.0.0: Sensor Dashboard
+    private lateinit var sensorDashboard: View
+    private lateinit var tvSensorSteps: TextView
+    private lateinit var tvSensorImu: TextView
+    private lateinit var tvSensorGps: TextView
     
     private val historyAdapter = ScanSessionAdapter()
 
@@ -85,6 +91,12 @@ class ScanFragment : Fragment() {
         tvSnapshots = view.findViewById(R.id.tvSnapshots)
         tvCount = view.findViewById(R.id.tvCount)
         rvHistory = view.findViewById(R.id.rvHistory)
+
+        // v3.0.0: Sensor Dashboard
+        sensorDashboard = view.findViewById(R.id.sensorDashboard)
+        tvSensorSteps = view.findViewById(R.id.tvSensorSteps)
+        tvSensorImu = view.findViewById(R.id.tvSensorImu)
+        tvSensorGps = view.findViewById(R.id.tvSensorGps)
         
         rvHistory.layoutManager = LinearLayoutManager(requireContext())
         rvHistory.adapter = historyAdapter
@@ -98,9 +110,11 @@ class ScanFragment : Fragment() {
                         if (isScanning) {
                             btnScan.setText(R.string.stop_scan)
                             tvStatus.text = "Активно"
+                            sensorDashboard.visibility = View.VISIBLE
                         } else {
                             btnScan.setText(R.string.start_scan)
                             tvStatus.text = "Остановлено"
+                            sensorDashboard.visibility = View.GONE
                         }
                     }
                 }
@@ -117,6 +131,35 @@ class ScanFragment : Fragment() {
                 launch {
                     viewModel.sessionHistory.collect { sessions ->
                         historyAdapter.submitList(sessions)
+                    }
+                }
+                // v3.0.0: Наблюдение за данными датчиков
+                launch {
+                    viewModel.sensorSnapshot.collect { snapshot ->
+                        if (snapshot != null) {
+                            // Шаги
+                            val stepsText = if (snapshot.stepsTotal != null) {
+                                "${snapshot.stepsTotal} (+${snapshot.stepsDelta ?: 0})"
+                            } else {
+                                "нет датчика"
+                            }
+                            tvSensorSteps.text = stepsText
+
+                            // IMU: Азимут + Ориентация
+                            val azText = snapshot.azimuth?.let {
+                                String.format(Locale.US, "%.0f°", it)
+                            } ?: "—"
+                            tvSensorImu.text = "$azText\n${snapshot.deviceOrientation}"
+                        }
+                    }
+                }
+                launch {
+                    viewModel.lastLocation.collect { location ->
+                        tvSensorGps.text = if (location != null) {
+                            String.format(Locale.US, "%.7f\n%.7f", location.first, location.second)
+                        } else {
+                            "Поиск..."
+                        }
                     }
                 }
             }
