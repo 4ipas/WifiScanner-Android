@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <!-- Контейнер для пунктов меню Action Sheet -->
+    <LinearLayout
+        android:id="@+id/llActionItems"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical" />
+
+    <!-- Кнопка Отмена (Официальный компонент) -->
+    <Button
+        android:id="@+id/btnActionCancel"
+        style="@style/Widget.WifiScanner.Button"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_marginTop="16dp"
+        android:text="Отмена" />
+
+</LinearLayout>

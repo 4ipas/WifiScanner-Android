@@ -166,6 +166,27 @@ class TasksFragment : Fragment() {
                                     Toast.makeText(requireContext(), "Локация завершена!", Toast.LENGTH_SHORT).show()
                                     adapter.notifyDataSetChanged()
                                     checkLevelCompletion()
+                                    
+                                    try {
+                                        val audioManager = requireContext().getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+                                        when (audioManager.ringerMode) {
+                                            android.media.AudioManager.RINGER_MODE_NORMAL -> {
+                                                val uri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION)
+                                                android.media.RingtoneManager.getRingtone(requireContext(), uri)?.play()
+                                            }
+                                            android.media.AudioManager.RINGER_MODE_VIBRATE -> {
+                                                val vibrator = requireContext().getSystemService(android.content.Context.VIBRATOR_SERVICE) as android.os.Vibrator
+                                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                                                    vibrator.vibrate(android.os.VibrationEffect.createOneShot(400, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+                                                } else {
+                                                    @Suppress("DEPRECATION")
+                                                    vibrator.vibrate(400)
+                                                }
+                                            }
+                                        }
+                                    } catch (e: Exception) {
+                                        e.printStackTrace()
+                                    }
                                 }
                             } else {
                                 task.status = "IN_PROGRESS_${count}_${records}"
@@ -373,44 +394,34 @@ class TasksFragment : Fragment() {
     }
     
     private fun showNodeMenu(node: NodeDTO, anchor: View) {
-        val popup = PopupMenu(requireContext(), anchor)
-        popup.menu.add(0, 1, 0, "Отсутствует (Пропустить)")
-        popup.menu.add(0, 2, 0, "Очистить готовое (Сброс)")
-        
-        popup.setOnMenuItemClickListener { item ->
-            when (item.itemId) {
-                1 -> { // Отсутствует
-                    val task = node.tasks.firstOrNull()
-                    if (task != null) {
-                        task.status = "SKIPPED"
-                        adapter.notifyItemChanged(adapter.currentList.indexOf(node))
-                        checkLevelCompletion()
-                    }
-                    true
+        val items = listOf(
+            "Отсутствует (Пропустить)" to {
+                val task = node.tasks.firstOrNull()
+                if (task != null) {
+                    task.status = "SKIPPED"
+                    adapter.notifyItemChanged(adapter.currentList.indexOf(node))
+                    checkLevelCompletion()
                 }
-                2 -> { // Очистить
-                    // Same as cancel, but regardless of active state
-                    if (activeScanNode?.id == node.id) {
-                        stopWifiScanService()
-                        activeScanNode = null
-                    }
-                    val fullName = getFullLocationName(node)
-                    CsvLogger.deleteForLocation(fullName)
-                    CsvLogger.removeLocationFromTasksCsv(WifiRepository.currentTaskCsvFilename, node.id)
-                    
-                    val task = node.tasks.firstOrNull()
-                    if (task != null) {
-                        task.status = "PENDING"
-                        adapter.notifyDataSetChanged()
-                        checkLevelCompletion()
-                    }
-                    Toast.makeText(requireContext(), "Данные локации стерты", Toast.LENGTH_SHORT).show()
-                    true
+            },
+            "Очистить готовое (Сброс)" to {
+                if (activeScanNode?.id == node.id) {
+                    stopWifiScanService()
+                    activeScanNode = null
                 }
-                else -> false
+                val fullName = getFullLocationName(node)
+                CsvLogger.deleteForLocation(fullName)
+                CsvLogger.removeLocationFromTasksCsv(WifiRepository.currentTaskCsvFilename, node.id)
+                
+                val task = node.tasks.firstOrNull()
+                if (task != null) {
+                    task.status = "PENDING"
+                    adapter.notifyDataSetChanged()
+                    checkLevelCompletion()
+                }
+                Toast.makeText(requireContext(), "Данные локации стерты", Toast.LENGTH_SHORT).show()
             }
-        }
-        popup.show()
+        )
+        com.example.wifiscanner.utils.UIHelper.showActionSheet(requireContext(), items)
     }
     
     private fun showAddLocationDialog() {

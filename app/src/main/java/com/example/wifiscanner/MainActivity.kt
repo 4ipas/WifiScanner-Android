@@ -50,8 +50,12 @@ class MainActivity : AppCompatActivity() {
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
-            R.id.action_settings -> {
-                startActivity(Intent(this, SettingsActivity::class.java))
+            R.id.action_custom_menu -> {
+                com.example.wifiscanner.utils.UIHelper.showActionSheet(this, listOf(
+                    "Настройки" to {
+                        startActivity(Intent(this, SettingsActivity::class.java))
+                    }
+                ))
                 true
             }
             else -> super.onOptionsItemSelected(item)

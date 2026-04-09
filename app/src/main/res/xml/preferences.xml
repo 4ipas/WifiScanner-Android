@@ -1,18 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
-<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto">
-    <PreferenceCategory app:title="Настройки сканирования">
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto"
+    app:iconSpaceReserved="false">
+    <PreferenceCategory 
+        app:title="Настройки сканирования"
+        app:iconSpaceReserved="false">
         <com.example.wifiscanner.ui.RightValuePreference
             app:key="pref_scan_interval"
             app:title="Интервал фонового сканирования"
             app:summary="Периодичность опроса сетей в фоне"
             app:dialogTitle="Интервал сканирования в секундах (1-1440)"
-            app:defaultValue="5" />
+            app:defaultValue="5"
+            app:iconSpaceReserved="false" />
             
         <com.example.wifiscanner.ui.RightValuePreference
             app:key="pref_scan_cooldown"
             app:title="Время охлаждения (сек)"
             app:summary="Задержка перед первым слепком после нажатия Старт"
             app:dialogTitle="Время на стабилизацию сборщика перед сбором эталона (сек)"
-            app:defaultValue="5" />
+            app:defaultValue="5"
+            app:iconSpaceReserved="false" />
     </PreferenceCategory>
 </PreferenceScreen>

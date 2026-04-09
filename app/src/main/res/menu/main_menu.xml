@@ -2,8 +2,8 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
     <item
-        android:id="@+id/action_settings"
-        android:title="Настройки"
-        android:icon="@android:drawable/ic_menu_preferences"
-        app:showAsAction="never" />
+        android:id="@+id/action_custom_menu"
+        android:title="Меню"
+        android:icon="@drawable/ic_more_vert"
+        app:showAsAction="always" />
 </menu>
