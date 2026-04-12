@@ -1,18 +1,21 @@
 package com.example.wifiscanner.utils
 
 import android.content.Context
-import android.util.TypedValue
-import android.view.Gravity
-import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.example.wifiscanner.R
 import com.google.android.material.bottomsheet.BottomSheetDialog
 
+data class ActionSheetItem(
+    val text: String,
+    val isDanger: Boolean = false,
+    val action: () -> Unit
+)
+
 object UIHelper {
 
-    fun showActionSheet(context: Context, items: List<Pair<String, () -> Unit>>) {
+    fun showActionSheet(context: Context, items: List<ActionSheetItem>) {
         val bottomSheetDialog = BottomSheetDialog(context)
         
         val view = android.view.LayoutInflater.from(context).inflate(R.layout.component_action_sheet, null)
@@ -23,8 +26,11 @@ object UIHelper {
         val dpToPx = { dp: Int -> (dp * density).toInt() }
         
         for ((index, item) in items.withIndex()) {
-            val itemView = android.view.LayoutInflater.from(context).inflate(R.layout.component_action_sheet_item, container, false) as TextView
-            itemView.text = item.first
+            val layoutRes = if (item.isDanger) R.layout.component_action_sheet_item_danger
+                            else R.layout.component_action_sheet_item
+            val itemView = android.view.LayoutInflater.from(context)
+                .inflate(layoutRes, container, false) as TextView
+            itemView.text = item.text
             
             if (index > 0) {
                 val params = itemView.layoutParams as LinearLayout.LayoutParams
@@ -33,7 +39,7 @@ object UIHelper {
             }
             
             itemView.setOnClickListener {
-                item.second.invoke()
+                item.action.invoke()
                 bottomSheetDialog.dismiss()
             }
             container.addView(itemView)

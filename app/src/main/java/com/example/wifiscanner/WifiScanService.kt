@@ -47,6 +47,7 @@ class WifiScanService : Service() {
     private var addressString: String = ""
     private var entranceString: String = ""
     private var floorString: String = ""
+    private var taskCsvFilename: String = ""
     private var globalRecordNumber: Long = 0L
     private var lastMaxTimestamp: Long = 0L
     private lateinit var sharedPreferences: SharedPreferences
@@ -67,6 +68,7 @@ class WifiScanService : Service() {
         const val EXTRA_ADDRESS = "extra_address"
         const val EXTRA_ENTRANCE = "extra_entrance"
         const val EXTRA_FLOOR = "extra_floor"
+        const val EXTRA_CSV_FILENAME = "extra_csv_filename"
     }
 
     private val locationCallback = object : LocationCallback() {
@@ -106,10 +108,15 @@ class WifiScanService : Service() {
             addressString = intent?.getStringExtra(EXTRA_ADDRESS) ?: ""
             entranceString = intent?.getStringExtra(EXTRA_ENTRANCE) ?: ""
             floorString = intent?.getStringExtra(EXTRA_FLOOR) ?: ""
+            taskCsvFilename = intent?.getStringExtra(EXTRA_CSV_FILENAME) ?: "wifi_tasks_default.csv"
+            WifiRepository.currentSessionCsvFileName = taskCsvFilename
+            WifiRepository.currentSessionIsManual = false
         } else {
             // Генерируем уникальное имя файла для ручного режима: wifi_scan_ddMMyyyy_HH-mm-ss.csv
             val timestamp = SimpleDateFormat("ddMMyyyy_HH-mm-ss", Locale.US).format(Date())
             manualScanFileName = "wifi_scan_$timestamp.csv"
+            WifiRepository.currentSessionCsvFileName = manualScanFileName
+            WifiRepository.currentSessionIsManual = true
         }
         
         if (intent?.hasExtra(EXTRA_REQUIRED_SCANS) == true) {
@@ -279,7 +286,7 @@ class WifiScanService : Service() {
 
             if (mappedResults.isNotEmpty()) {
                 if (isTaskMode) {
-                    CsvLogger.logTasksResults(WifiRepository.currentTaskCsvFilename, mappedResults)
+                    CsvLogger.logTasksResults(taskCsvFilename, mappedResults)
                 } else {
                     // Используем уникальное имя файла с временной меткой
                     CsvLogger.logResults(manualScanFileName, mappedResults)

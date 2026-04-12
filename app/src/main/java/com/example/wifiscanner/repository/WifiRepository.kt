@@ -7,14 +7,23 @@ import com.example.wifiscanner.utils.SensorSnapshot
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.Stack
 
 object WifiRepository {
-    var rootNode: NodeDTO? = null
+    /** Список всех загруженных заданий (домов). Множественные задания одновременно. */
+    val rootNodes = mutableListOf<NodeDTO>()
     val navStack = Stack<NodeDTO>()
-    var currentTaskCsvFilename: String = "wifi_tasks_default.csv"
     var activeScanNode: NodeDTO? = null
     var pendingScanNode: NodeDTO? = null
+
+    /** Per-entrance CSV filenames: entranceNodeId → filename */
+    val entranceCsvFilenames = mutableMapOf<String, String>()
+
+    /** CSV filename активного скана (для cancel/reset без навигации) */
+    var activeScanCsvFilename: String? = null
 
     private val _scanResults = MutableStateFlow<List<WifiScanResult>>(emptyList())
     val scanResults: StateFlow<List<WifiScanResult>> = _scanResults.asStateFlow()
@@ -31,7 +40,6 @@ object WifiRepository {
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
 
-    // v3.0.0: Данные датчиков для UI
     private val _sensorSnapshot = MutableStateFlow<SensorSnapshot?>(null)
     val sensorSnapshot: StateFlow<SensorSnapshot?> = _sensorSnapshot.asStateFlow()
 
@@ -54,6 +62,11 @@ object WifiRepository {
         _totalSnapshots.value += 1
     }
     
+    /** CSV-файл текущей сессии (для manual scans) */
+    var currentSessionCsvFileName: String? = null
+    /** true = ручной скан (вкладка Запись), false = из заданий */
+    var currentSessionIsManual: Boolean = false
+
     fun startNewSession(locationName: String, startTime: String) {
         _totalRecords.value = 0
         _totalSnapshots.value = 0
@@ -71,10 +84,12 @@ object WifiRepository {
                 startTime = currentSessionStartTime,
                 endTime = endTime,
                 snapshotCount = _totalSnapshots.value,
-                recordCount = _totalRecords.value
+                recordCount = _totalRecords.value,
+                csvFileName = currentSessionCsvFileName,
+                isManualScan = currentSessionIsManual
             )
             val updatedHistory = _sessionHistory.value.toMutableList()
-            updatedHistory.add(0, session) // Add to top of list
+            updatedHistory.add(0, session)
             _sessionHistory.value = updatedHistory
             setScanning(false)
         }
@@ -84,12 +99,24 @@ object WifiRepository {
         _isScanning.value = scanning
     }
 
-    // v3.0.0: Обновление данных датчиков для UI
     fun updateSensorSnapshot(snapshot: SensorSnapshot) {
         _sensorSnapshot.value = snapshot
     }
 
     fun updateLocation(latitude: Double, longitude: Double) {
         _lastLocation.value = Pair(latitude, longitude)
+    }
+
+    /**
+     * Ленивое создание имени CSV-файла для подъезда.
+     * Формат: АдресДома_НомерПодъезда_YYYYMMDD_HHmm.csv
+     */
+    fun getCsvFilenameForEntrance(entranceId: String, addressName: String, entranceName: String): String {
+        return entranceCsvFilenames.getOrPut(entranceId) {
+            val safeAddress = addressName.replace(Regex("[^\\wа-яА-ЯёЁ0-9]"), "_")
+            val safeEntrance = entranceName.replace(Regex("[^\\wа-яА-ЯёЁ0-9]"), "_")
+            val df = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault())
+            "${safeAddress}_${safeEntrance}_${df.format(Date())}.csv"
+        }
     }
 }

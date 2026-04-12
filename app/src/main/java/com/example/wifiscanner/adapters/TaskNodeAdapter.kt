@@ -5,8 +5,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.ImageButton
-import android.widget.ImageView
-import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
@@ -50,7 +48,19 @@ class TaskNodeAdapter(
             itemView.setOnClickListener { onNodeClick(node) }
 
             when (node.nodeType) {
-                "ADDRESS", "ENTRANCE", "FLOOR" -> {
+                "ADDRESS" -> {
+                    val stats = calcStats(node)
+                    btnMenu.visibility = View.VISIBLE
+                    if (stats.isFinished && stats.total > 0) {
+                        tvNodeStatus.text = "Завершено (${stats.completed}/${stats.total})"
+                        tvNodeStatus.setTextColor(android.graphics.Color.parseColor("#388E3C"))
+                    } else {
+                        tvNodeStatus.text = "Локаций: ${stats.completed}/${stats.total}"
+                        tvNodeStatus.setTextColor(defaultStatusColor)
+                    }
+                    btnMenu.setOnClickListener { onActionMenu(node, it) }
+                }
+                "ENTRANCE", "FLOOR" -> {
                     val stats = calcStats(node)
                     if (stats.isFinished && stats.total > 0) {
                         tvNodeStatus.text = "Завершено (${stats.completed}/${stats.total})"
@@ -69,7 +79,6 @@ class TaskNodeAdapter(
                     val required = task?.requiredScans ?: 5
                     val status = task?.status ?: "PENDING"
                     
-                    // Format status
                     if (status.startsWith("COMPLETED")) {
                         val recordsText = status.substringAfter("COMPLETED_", "").let { 
                             if (it.isNotEmpty()) " | Записей: $it" else "" 

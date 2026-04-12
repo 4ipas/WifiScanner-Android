@@ -65,6 +65,16 @@ object CsvLogger {
         }
     }
 
+    /** Удаляет CSV-файл задания целиком (по имени файла). */
+    fun deleteTaskCsvFile(fileName: String) {
+        val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), DIR_NAME)
+        val file = File(dir, fileName)
+        if (file.exists()) {
+            file.delete()
+            Log.d(TAG, "Deleted task CSV: $fileName")
+        }
+    }
+
     @Synchronized
     fun logTasksResults(fileName: String, results: List<WifiScanResult>) {
         if (results.isEmpty()) return

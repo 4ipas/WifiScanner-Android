@@ -8,11 +8,11 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
-import androidx.appcompat.widget.PopupMenu
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -24,10 +24,14 @@ import com.example.wifiscanner.WifiScanService
 import com.example.wifiscanner.adapters.TaskNodeAdapter
 import com.example.wifiscanner.models.NodeDTO
 import com.example.wifiscanner.models.ScanTaskDTO
+import com.example.wifiscanner.models.deepCopyWithReset
 import com.example.wifiscanner.repository.WifiRepository
+import com.example.wifiscanner.utils.ActionSheetItem
 import com.example.wifiscanner.utils.CsvLogger
+import com.example.wifiscanner.utils.TaskDownloader
+import com.example.wifiscanner.utils.TaskPersistence
+import com.example.wifiscanner.utils.UIHelper
 import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
-import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.gson.Gson
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
@@ -56,12 +60,17 @@ class TasksFragment : Fragment() {
     private lateinit var rvTasks: RecyclerView
     private lateinit var btnAddLocation: ImageButton
     private lateinit var fabNextLevel: ExtendedFloatingActionButton
+
+    // Completed section (Variant B — визуальная группировка)
+    private lateinit var llCompletedSection: LinearLayout
+    private lateinit var tvCompletedHeader: TextView
+    private lateinit var llCompletedItems: LinearLayout
+    private var completedExpanded = false
     
     private lateinit var adapter: TaskNodeAdapter
-    
-    private var rootNode: NodeDTO?
-        get() = WifiRepository.rootNode
-        set(value) { WifiRepository.rootNode = value }
+
+    private val rootNodes: MutableList<NodeDTO>
+        get() = WifiRepository.rootNodes
 
     private val navStack: Stack<NodeDTO>
         get() = WifiRepository.navStack
@@ -107,6 +116,10 @@ class TasksFragment : Fragment() {
         rvTasks = view.findViewById(R.id.rvTasks)
         btnAddLocation = view.findViewById(R.id.btnAddLocation)
         fabNextLevel = view.findViewById(R.id.fabNextLevel)
+
+        llCompletedSection = view.findViewById(R.id.llCompletedSection)
+        tvCompletedHeader = view.findViewById(R.id.tvCompletedHeader)
+        llCompletedItems = view.findViewById(R.id.llCompletedItems)
         
         rvTasks.layoutManager = LinearLayoutManager(requireContext())
         adapter = TaskNodeAdapter(
@@ -117,9 +130,7 @@ class TasksFragment : Fragment() {
         )
         rvTasks.adapter = adapter
         
-        btnLoadTasks.setOnClickListener {
-            getJsonLauncher.launch("application/json")
-        }
+        btnLoadTasks.setOnClickListener { showLoadTasksMenu() }
 
         btnSaveTasks.setOnClickListener {
             val dateFormat = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault())
@@ -127,28 +138,93 @@ class TasksFragment : Fragment() {
             saveJsonLauncher.launch(filename)
         }
         
-        btnBack.setOnClickListener {
-            goBack()
-        }
-        
-        tvBreadcrumbs.setOnClickListener {
-            goBack()
-        }
-        
-        btnAddLocation.setOnClickListener {
-            showAddLocationDialog()
+        btnBack.setOnClickListener { goBack() }
+        tvBreadcrumbs.setOnClickListener { goBack() }
+        btnAddLocation.setOnClickListener { showAddLocationDialog() }
+        fabNextLevel.setOnClickListener { goToNextLevel() }
+
+        tvCompletedHeader.setOnClickListener {
+            completedExpanded = !completedExpanded
+            llCompletedItems.visibility = if (completedExpanded) View.VISIBLE else View.GONE
         }
 
-        fabNextLevel.setOnClickListener {
-            goToNextLevel()
-        }
-
+        restoreState()
         observeScanning()
-        updateUI() // Restore UI state from repository on fragment recreation
+        updateUI()
         
         return view
     }
+
+    // ─── Персистентность ───────────────────────────────────────────
+
+    private fun restoreState() {
+        if (rootNodes.isEmpty()) {
+            val ctx = requireContext()
+            val loaded = TaskPersistence.loadTasks(ctx)
+            rootNodes.clear()
+            rootNodes.addAll(loaded)
+            val csvMap = TaskPersistence.loadCsvMap(ctx)
+            WifiRepository.entranceCsvFilenames.clear()
+            WifiRepository.entranceCsvFilenames.putAll(csvMap)
+        }
+    }
+
+    private fun persistState() {
+        val ctx = context ?: return
+        TaskPersistence.saveTasks(ctx, rootNodes)
+        TaskPersistence.saveCsvMap(ctx, WifiRepository.entranceCsvFilenames)
+    }
+
+    // ─── Загрузка заданий (ActionSheet) ────────────────────────────
+
+    private fun showLoadTasksMenu() {
+        val items = listOf(
+            ActionSheetItem("Из памяти телефона") {
+                getJsonLauncher.launch("application/json")
+            },
+            ActionSheetItem("По ссылке") {
+                showUrlLoadDialog()
+            }
+        )
+        UIHelper.showActionSheet(requireContext(), items)
+    }
+
+    private fun showUrlLoadDialog() {
+        val input = EditText(requireContext())
+        input.hint = "Вставьте ссылку на JSON"
+        input.minLines = 3
+        input.isSingleLine = false
+
+        AlertDialog.Builder(requireContext())
+            .setTitle("Загрузка по ссылке")
+            .setMessage("Поддерживаются прямые ссылки и Яндекс.Диск")
+            .setView(input)
+            .setPositiveButton("Загрузить") { _, _ ->
+                val url = input.text.toString().trim()
+                if (url.isNotEmpty()) {
+                    downloadAndLoadJson(url)
+                }
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
+    private fun downloadAndLoadJson(url: String) {
+        Toast.makeText(requireContext(), "Загрузка...", Toast.LENGTH_SHORT).show()
+        viewLifecycleOwner.lifecycleScope.launch {
+            val result = TaskDownloader.downloadJson(url)
+            result.onSuccess { jsonString ->
+                addTaskFromJson(jsonString)
+                Toast.makeText(requireContext(), "Задание загружено", Toast.LENGTH_SHORT).show()
+            }
+            result.onFailure { error ->
+                Toast.makeText(requireContext(), "Ошибка загрузки: ${error.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
     
+    // ─── Наблюдение за сканированием ───────────────────────────────
+
     private fun observeScanning() {
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -163,30 +239,12 @@ class TasksFragment : Fragment() {
                                     task.status = "COMPLETED_$records"
                                     stopWifiScanService()
                                     activeScanNode = null
+                                    WifiRepository.activeScanCsvFilename = null
                                     Toast.makeText(requireContext(), "Локация завершена!", Toast.LENGTH_SHORT).show()
                                     adapter.notifyDataSetChanged()
                                     checkLevelCompletion()
-                                    
-                                    try {
-                                        val audioManager = requireContext().getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
-                                        when (audioManager.ringerMode) {
-                                            android.media.AudioManager.RINGER_MODE_NORMAL -> {
-                                                val uri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION)
-                                                android.media.RingtoneManager.getRingtone(requireContext(), uri)?.play()
-                                            }
-                                            android.media.AudioManager.RINGER_MODE_VIBRATE -> {
-                                                val vibrator = requireContext().getSystemService(android.content.Context.VIBRATOR_SERVICE) as android.os.Vibrator
-                                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                                                    vibrator.vibrate(android.os.VibrationEffect.createOneShot(400, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
-                                                } else {
-                                                    @Suppress("DEPRECATION")
-                                                    vibrator.vibrate(400)
-                                                }
-                                            }
-                                        }
-                                    } catch (e: Exception) {
-                                        e.printStackTrace()
-                                    }
+                                    persistState()
+                                    playScanCompleteSound()
                                 }
                             } else {
                                 task.status = "IN_PROGRESS_${count}_${records}"
@@ -199,27 +257,53 @@ class TasksFragment : Fragment() {
             }
         }
     }
-    
+
+    private fun playScanCompleteSound() {
+        try {
+            val audioManager = requireContext().getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+            when (audioManager.ringerMode) {
+                android.media.AudioManager.RINGER_MODE_NORMAL -> {
+                    val uri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION)
+                    android.media.RingtoneManager.getRingtone(requireContext(), uri)?.play()
+                }
+                android.media.AudioManager.RINGER_MODE_VIBRATE -> {
+                    val vibrator = requireContext().getSystemService(android.content.Context.VIBRATOR_SERVICE) as android.os.Vibrator
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        vibrator.vibrate(android.os.VibrationEffect.createOneShot(400, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+                    } else {
+                        @Suppress("DEPRECATION")
+                        vibrator.vibrate(400)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    // ─── Загрузка / Сохранение JSON ────────────────────────────────
+
     private fun loadJsonFromUri(uri: android.net.Uri) {
         try {
             val inputStream = requireContext().contentResolver.openInputStream(uri)
             val reader = InputStreamReader(inputStream!!)
-            rootNode = Gson().fromJson(reader, NodeDTO::class.java)
+            val jsonString = reader.readText()
             reader.close()
-            
-            navStack.clear()
-            activeScanNode = null
-            stopWifiScanService() // safety
-            
-            val dateFormat = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault())
-            WifiRepository.currentTaskCsvFilename = "wifi_tasks_blueprint_${dateFormat.format(Date())}.csv"
-            
-            updateUI()
-            Toast.makeText(requireContext(), "Задания загружены", Toast.LENGTH_SHORT).show()
+            addTaskFromJson(jsonString)
+            Toast.makeText(requireContext(), "Задание загружено", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             e.printStackTrace()
             Toast.makeText(requireContext(), "Ошибка загрузки JSON", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    /** Добавляет задание в список. Не заменяет существующие. */
+    private fun addTaskFromJson(jsonString: String) {
+        val newRoot = Gson().fromJson(jsonString, NodeDTO::class.java)
+        rootNodes.add(newRoot)
+        navStack.clear()
+        persistState()
+        updateUI()
     }
     
     private fun saveJsonToUri(uri: android.net.Uri) {
@@ -227,7 +311,7 @@ class TasksFragment : Fragment() {
             val outputStream = requireContext().contentResolver.openOutputStream(uri)
             val writer = java.io.OutputStreamWriter(outputStream!!)
             val gson = com.google.gson.GsonBuilder().setPrettyPrinting().create()
-            val jsonString = gson.toJson(WifiRepository.rootNode)
+            val jsonString = gson.toJson(rootNodes)
             writer.write(jsonString)
             writer.close()
             Toast.makeText(requireContext(), "Файл успешно сохранен!", Toast.LENGTH_SHORT).show()
@@ -236,6 +320,8 @@ class TasksFragment : Fragment() {
             Toast.makeText(requireContext(), "Ошибка при сохранении", Toast.LENGTH_SHORT).show()
         }
     }
+
+    // ─── Навигация ─────────────────────────────────────────────────
     
     private fun handleNodeClick(node: NodeDTO) {
         if (node.nodeType != "LOCATION") {
@@ -252,23 +338,20 @@ class TasksFragment : Fragment() {
     }
     
     private fun updateUI() {
-        if (rootNode == null) {
-            tvBreadcrumbs.text = "Объекты"
-            btnBack.visibility = View.GONE
-            btnLoadTasks.visibility = View.VISIBLE
-            btnSaveTasks.visibility = View.GONE
-            adapter.submitList(emptyList())
-            btnAddLocation.visibility = View.GONE
-            return
-        }
-        
         if (navStack.isEmpty()) {
+            // Корневой уровень: показать все задания
             tvBreadcrumbs.text = "Объекты (Корень)"
             btnBack.visibility = View.GONE
             btnLoadTasks.visibility = View.VISIBLE
-            btnSaveTasks.visibility = View.VISIBLE
-            adapter.submitList(listOf(rootNode!!))
+            btnSaveTasks.visibility = if (rootNodes.isNotEmpty()) View.VISIBLE else View.GONE
             btnAddLocation.visibility = View.GONE
+
+            // Разделяем на активные и завершённые
+            val active = rootNodes.filter { !isFullyCompleted(it) }
+            val completed = rootNodes.filter { isFullyCompleted(it) }
+
+            adapter.submitList(active.toList())
+            updateCompletedSection(completed)
         } else {
             val current = navStack.peek()
             val path = navStack.joinToString(" > ") { it.name }
@@ -280,15 +363,55 @@ class TasksFragment : Fragment() {
             val newList = ArrayList(current.children)
             adapter.submitList(newList)
             
-            if (current.nodeType == "FLOOR") {
-                btnAddLocation.visibility = View.VISIBLE
-            } else {
-                btnAddLocation.visibility = View.GONE
-            }
+            btnAddLocation.visibility = if (current.nodeType == "FLOOR") View.VISIBLE else View.GONE
+            llCompletedSection.visibility = View.GONE
             
             checkLevelCompletion()
         }
     }
+
+    // ─── Секция завершённых (Variant B — визуальная группировка) ───
+
+    private fun updateCompletedSection(completed: List<NodeDTO>) {
+        if (completed.isEmpty()) {
+            llCompletedSection.visibility = View.GONE
+            return
+        }
+        
+        llCompletedSection.visibility = View.VISIBLE
+        tvCompletedHeader.text = "📋 Завершено: ${completed.size}"
+        
+        llCompletedItems.removeAllViews()
+        for (node in completed) {
+            val itemView = LayoutInflater.from(requireContext())
+                .inflate(R.layout.item_completed_task, llCompletedItems, false)
+            
+            val tvName = itemView.findViewById<TextView>(R.id.tvCompletedName)
+            val tvDate = itemView.findViewById<TextView>(R.id.tvCompletedDate)
+
+            val stats = calcTreeStats(node)
+            tvName.text = "${node.name}  (${stats.completed}✓ ${stats.skipped}⊘)"
+            tvDate.text = "" // Нет даты завершения — задание просто помечено как полное
+
+            // Клик по завершённому — навигация внутрь
+            itemView.setOnClickListener {
+                navStack.push(node)
+                updateUI()
+            }
+
+            // Долгое нажатие — меню (копировать)
+            itemView.setOnLongClickListener {
+                showAddressMenu(node)
+                true
+            }
+
+            llCompletedItems.addView(itemView)
+        }
+        
+        llCompletedItems.visibility = if (completedExpanded) View.VISIBLE else View.GONE
+    }
+
+    // ─── Сканирование ──────────────────────────────────────────────
     
     private fun getFullLocationName(node: NodeDTO): String {
         val pathNames = navStack.map { it.name }.toMutableList()
@@ -334,8 +457,6 @@ class TasksFragment : Fragment() {
         val fullName = getFullLocationName(node)
         val startTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
         
-        // Reset everything AND trigger flows while activeScanNode is still null
-        // This prevents 'combine' flow from emitting a dirty state (e.g. 5, 0) to the new active node
         WifiRepository.startNewSession(fullName, startTime)
         
         val task = node.tasks.firstOrNull()
@@ -344,11 +465,18 @@ class TasksFragment : Fragment() {
             adapter.notifyDataSetChanged()
         }
         activeScanNode = node
+
+        // Per-entrance CSV
+        val addressName = navStack.getOrNull(0)?.name ?: "unknown"
+        val entranceNode = navStack.getOrNull(1)
+        val entranceName = entranceNode?.name ?: "unknown"
+        val entranceId = entranceNode?.id ?: "unknown"
+        val csvFilename = WifiRepository.getCsvFilenameForEntrance(entranceId, addressName, entranceName)
+        WifiRepository.activeScanCsvFilename = csvFilename
         
-        // Start physical service
-        val address = WifiRepository.navStack.getOrNull(0)?.name ?: ""
-        val entrance = WifiRepository.navStack.getOrNull(1)?.name ?: ""
-        val floor = WifiRepository.navStack.getOrNull(2)?.name ?: ""
+        val address = navStack.getOrNull(0)?.name ?: ""
+        val entrance = navStack.getOrNull(1)?.name ?: ""
+        val floor = navStack.getOrNull(2)?.name ?: ""
         
         val intent = Intent(requireContext(), WifiScanService::class.java)
         intent.putExtra(WifiScanService.EXTRA_LOCATION_NAME, node.name)
@@ -358,12 +486,15 @@ class TasksFragment : Fragment() {
         intent.putExtra(WifiScanService.EXTRA_ENTRANCE, entrance)
         intent.putExtra(WifiScanService.EXTRA_FLOOR, floor)
         intent.putExtra(WifiScanService.EXTRA_REQUIRED_SCANS, task?.requiredScans ?: 5)
+        intent.putExtra(WifiScanService.EXTRA_CSV_FILENAME, csvFilename)
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             requireContext().startForegroundService(intent)
         } else {
             requireContext().startService(intent)
         }
+        
+        persistState()
     }
     
     private fun stopWifiScanService() {
@@ -383,47 +514,219 @@ class TasksFragment : Fragment() {
         
         val fullName = getFullLocationName(node)
         CsvLogger.deleteForLocation(fullName)
-        CsvLogger.removeLocationFromTasksCsv(WifiRepository.currentTaskCsvFilename, node.id)
+
+        val csvFilename = WifiRepository.activeScanCsvFilename ?: deriveCsvFilenameFromNavStack()
+        CsvLogger.removeLocationFromTasksCsv(csvFilename, node.id)
+        WifiRepository.activeScanCsvFilename = null
         
         val task = node.tasks.firstOrNull()
         if (task != null) {
             task.status = "PENDING"
             adapter.notifyDataSetChanged()
         }
+        persistState()
         Toast.makeText(requireContext(), "Запись отменена, данные удалены", Toast.LENGTH_SHORT).show()
     }
+
+    private fun deriveCsvFilenameFromNavStack(): String {
+        val addressName = navStack.getOrNull(0)?.name ?: "unknown"
+        val entranceNode = navStack.getOrNull(1)
+        val entranceName = entranceNode?.name ?: "unknown"
+        val entranceId = entranceNode?.id ?: "unknown"
+        return WifiRepository.getCsvFilenameForEntrance(entranceId, addressName, entranceName)
+    }
+
+    // ─── Меню узлов ────────────────────────────────────────────────
     
     private fun showNodeMenu(node: NodeDTO, anchor: View) {
+        when (node.nodeType) {
+            "ADDRESS" -> showAddressMenu(node)
+            "LOCATION" -> showLocationMenu(node)
+        }
+    }
+
+    private fun showAddressMenu(node: NodeDTO) {
+        val items = mutableListOf<ActionSheetItem>()
+
+        // Отправить — только для завершённых (есть CSV-данные)
+        if (isFullyCompleted(node)) {
+            items.add(ActionSheetItem("Отправить задание") {
+                shareTask(node)
+            })
+        }
+
+        // Копировать — всегда доступно
+        items.add(ActionSheetItem("Копировать задание") {
+            copyTask(node)
+        })
+
+        // Удалить — только если НЕ завершено
+        if (!isFullyCompleted(node)) {
+            items.add(ActionSheetItem("Удалить задание", isDanger = true, action = {
+                confirmDeleteTask(node)
+            }))
+        }
+
+        UIHelper.showActionSheet(requireContext(), items)
+    }
+
+    private fun showLocationMenu(node: NodeDTO) {
         val items = listOf(
-            "Отсутствует (Пропустить)" to {
+            ActionSheetItem("Отсутствует (Пропустить)") {
                 val task = node.tasks.firstOrNull()
                 if (task != null) {
                     task.status = "SKIPPED"
                     adapter.notifyItemChanged(adapter.currentList.indexOf(node))
                     checkLevelCompletion()
+                    persistState()
                 }
             },
-            "Очистить готовое (Сброс)" to {
+            ActionSheetItem("Очистить готовое (Сброс)") {
                 if (activeScanNode?.id == node.id) {
                     stopWifiScanService()
                     activeScanNode = null
                 }
                 val fullName = getFullLocationName(node)
                 CsvLogger.deleteForLocation(fullName)
-                CsvLogger.removeLocationFromTasksCsv(WifiRepository.currentTaskCsvFilename, node.id)
+                
+                val csvFilename = deriveCsvFilenameFromNavStack()
+                CsvLogger.removeLocationFromTasksCsv(csvFilename, node.id)
                 
                 val task = node.tasks.firstOrNull()
                 if (task != null) {
                     task.status = "PENDING"
                     adapter.notifyDataSetChanged()
                     checkLevelCompletion()
+                    persistState()
                 }
                 Toast.makeText(requireContext(), "Данные локации стерты", Toast.LENGTH_SHORT).show()
             }
         )
-        com.example.wifiscanner.utils.UIHelper.showActionSheet(requireContext(), items)
+        UIHelper.showActionSheet(requireContext(), items)
+    }
+
+    // ─── Удаление задания ──────────────────────────────────────────
+
+    private fun confirmDeleteTask(node: NodeDTO) {
+        AlertDialog.Builder(requireContext())
+            .setTitle("Удалить задание?")
+            .setMessage("Задание «${node.name}» и все записанные данные (CSV) будут удалены.")
+            .setPositiveButton("Удалить") { _, _ ->
+                deleteTask(node)
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
+    private fun deleteTask(node: NodeDTO) {
+        // Остановить скан, если активен внутри этого задания
+        if (activeScanNode != null && isDescendantOf(activeScanNode!!, node)) {
+            stopWifiScanService()
+            activeScanNode = null
+            WifiRepository.activeScanCsvFilename = null
+        }
+
+        // Удалить CSV-файлы всех подъездов этого задания
+        deleteEntranceCsvFiles(node)
+
+        // Удалить из списка
+        rootNodes.removeAll { it.id == node.id }
+        navStack.clear()
+
+        persistState()
+        updateUI()
+        Toast.makeText(requireContext(), "Задание удалено", Toast.LENGTH_SHORT).show()
+    }
+
+    /** Рекурсивно удаляет CSV-файлы для всех ENTRANCE-узлов задания */
+    private fun deleteEntranceCsvFiles(node: NodeDTO) {
+        if (node.nodeType == "ENTRANCE") {
+            val csvFilename = WifiRepository.entranceCsvFilenames.remove(node.id)
+            if (csvFilename != null) {
+                CsvLogger.deleteTaskCsvFile(csvFilename)
+            }
+        }
+        for (child in node.children) {
+            deleteEntranceCsvFiles(child)
+        }
+    }
+
+    /** Проверяет, является ли target потомком parent */
+    private fun isDescendantOf(target: NodeDTO, parent: NodeDTO): Boolean {
+        if (parent.id == target.id) return true
+        return parent.children.any { isDescendantOf(target, it) }
+    }
+
+    // ─── Отправка задания ────────────────────────────────────────────
+
+    private fun shareTask(node: NodeDTO) {
+        val csvFiles = collectEntranceCsvFiles(node)
+
+        if (csvFiles.isEmpty()) {
+            Toast.makeText(requireContext(), "Нет CSV-файлов для отправки", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val uris = ArrayList<android.net.Uri>()
+        for (file in csvFiles) {
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                requireContext(),
+                "${requireContext().packageName}.fileprovider",
+                file
+            )
+            uris.add(uri)
+        }
+
+        val shareIntent = Intent().apply {
+            action = Intent.ACTION_SEND_MULTIPLE
+            type = "text/csv"
+            putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+            putExtra(Intent.EXTRA_SUBJECT, "Wi-Fi сканы: ${node.name}")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
+        startActivity(Intent.createChooser(shareIntent, "Отправить результаты"))
+    }
+
+    /** Собирает все CSV-файлы для подъездов данного задания */
+    private fun collectEntranceCsvFiles(node: NodeDTO): List<java.io.File> {
+        val dir = java.io.File(
+            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOCUMENTS),
+            "MyWifiScans"
+        )
+        val files = mutableListOf<java.io.File>()
+        collectCsvFilesRecursive(node, dir, files)
+        return files
+    }
+
+    private fun collectCsvFilesRecursive(node: NodeDTO, dir: java.io.File, result: MutableList<java.io.File>) {
+        if (node.nodeType == "ENTRANCE") {
+            val csvFilename = WifiRepository.entranceCsvFilenames[node.id]
+            if (csvFilename != null) {
+                val file = java.io.File(dir, csvFilename)
+                if (file.exists()) {
+                    result.add(file)
+                }
+            }
+        }
+        for (child in node.children) {
+            collectCsvFilesRecursive(child, dir, result)
+        }
+    }
+
+    // ─── Копирование задания ───────────────────────────────────────
+
+    private fun copyTask(node: NodeDTO) {
+        val copy = node.deepCopyWithReset()
+        // Имя НЕ меняется — уникальность гарантирована GUID (id)
+        rootNodes.add(copy)
+        persistState()
+        updateUI()
+        Toast.makeText(requireContext(), "Задание скопировано", Toast.LENGTH_SHORT).show()
     }
     
+    // ─── Добавление локации ────────────────────────────────────────
+
     private fun showAddLocationDialog() {
         val input = EditText(requireContext())
         input.hint = "Название новой локации"
@@ -451,11 +754,41 @@ class TasksFragment : Fragment() {
                     field.isAccessible = true
                     field.set(currentParent, mutableChildren)
                     
+                    persistState()
                     updateUI()
                 }
             }
             .setNegativeButton("Отмена", null)
             .show()
+    }
+
+    // ─── Утилиты ───────────────────────────────────────────────────
+
+    private fun isFullyCompleted(node: NodeDTO): Boolean {
+        if (node.nodeType == "LOCATION") {
+            val status = node.tasks.firstOrNull()?.status ?: "PENDING"
+            return status.startsWith("COMPLETED") || status == "SKIPPED"
+        }
+        return node.children.isNotEmpty() && node.children.all { isFullyCompleted(it) }
+    }
+
+    private data class TreeStats(val total: Int, val completed: Int, val skipped: Int, val pending: Int)
+
+    private fun calcTreeStats(node: NodeDTO): TreeStats {
+        if (node.nodeType == "LOCATION") {
+            val status = node.tasks.firstOrNull()?.status ?: "PENDING"
+            return when {
+                status.startsWith("COMPLETED") -> TreeStats(1, 1, 0, 0)
+                status == "SKIPPED" -> TreeStats(1, 0, 1, 0)
+                else -> TreeStats(1, 0, 0, 1)
+            }
+        }
+        var t = 0; var c = 0; var s = 0; var p = 0
+        for (child in node.children) {
+            val st = calcTreeStats(child)
+            t += st.total; c += st.completed; s += st.skipped; p += st.pending
+        }
+        return TreeStats(t, c, s, p)
     }
 
     private fun checkLocationEnabled(): Boolean {

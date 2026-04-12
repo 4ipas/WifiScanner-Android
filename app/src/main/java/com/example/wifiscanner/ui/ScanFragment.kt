@@ -6,31 +6,37 @@ import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.provider.Settings
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import androidx.core.content.FileProvider
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
 import com.example.wifiscanner.R
 import com.example.wifiscanner.WifiScanService
-import com.example.wifiscanner.adapters.ScanSessionAdapter
+import com.example.wifiscanner.models.ScanSession
 import com.example.wifiscanner.repository.WifiRepository
+import com.example.wifiscanner.utils.ActionSheetItem
+import com.example.wifiscanner.utils.CsvLogger
 import com.example.wifiscanner.utils.PermissionHelper
+import com.example.wifiscanner.utils.UIHelper
 import com.example.wifiscanner.viewmodel.WifiViewModel
 import kotlinx.coroutines.launch
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -44,15 +50,17 @@ class ScanFragment : Fragment() {
     private lateinit var tvStatus: TextView
     private lateinit var tvSnapshots: TextView
     private lateinit var tvCount: TextView
-    private lateinit var rvHistory: RecyclerView
 
-    // v3.0.0: Sensor Dashboard
     private lateinit var sensorDashboard: View
     private lateinit var tvSensorSteps: TextView
     private lateinit var tvSensorImu: TextView
     private lateinit var tvSensorGps: TextView
-    
-    private val historyAdapter = ScanSessionAdapter()
+
+    // Секция завершённых ручных сканов
+    private lateinit var llCompletedSection: LinearLayout
+    private lateinit var tvCompletedHeader: TextView
+    private lateinit var llCompletedItems: LinearLayout
+    private var completedExpanded = false
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -61,7 +69,6 @@ class ScanFragment : Fragment() {
         if (!allGranted) {
             showPermissionDeniedDialog()
         } else {
-            // Permissions granted, we can start the service now
             executeStartService()
         }
     }
@@ -90,16 +97,20 @@ class ScanFragment : Fragment() {
         tvStatus = view.findViewById(R.id.tvStatus)
         tvSnapshots = view.findViewById(R.id.tvSnapshots)
         tvCount = view.findViewById(R.id.tvCount)
-        rvHistory = view.findViewById(R.id.rvHistory)
 
-        // v3.0.0: Sensor Dashboard
         sensorDashboard = view.findViewById(R.id.sensorDashboard)
         tvSensorSteps = view.findViewById(R.id.tvSensorSteps)
         tvSensorImu = view.findViewById(R.id.tvSensorImu)
         tvSensorGps = view.findViewById(R.id.tvSensorGps)
-        
-        rvHistory.layoutManager = LinearLayoutManager(requireContext())
-        rvHistory.adapter = historyAdapter
+
+        llCompletedSection = view.findViewById(R.id.llCompletedSection)
+        tvCompletedHeader = view.findViewById(R.id.tvCompletedHeader)
+        llCompletedItems = view.findViewById(R.id.llCompletedItems)
+
+        tvCompletedHeader.setOnClickListener {
+            completedExpanded = !completedExpanded
+            llCompletedItems.visibility = if (completedExpanded) View.VISIBLE else View.GONE
+        }
     }
 
     private fun observeViewModel() {
@@ -128,24 +139,21 @@ class ScanFragment : Fragment() {
                         tvCount.text = getString(R.string.records_count, count)
                     }
                 }
+                // Обновлять секцию завершённых при изменении истории
                 launch {
                     viewModel.sessionHistory.collect { sessions ->
-                        historyAdapter.submitList(sessions)
+                        updateCompletedSection(sessions.filter { it.isManualScan && it.endTime != null })
                     }
                 }
-                // v3.0.0: Наблюдение за данными датчиков
                 launch {
                     viewModel.sensorSnapshot.collect { snapshot ->
                         if (snapshot != null) {
-                            // Шаги
                             val stepsText = if (snapshot.stepsTotal != null) {
                                 "${snapshot.stepsTotal} (+${snapshot.stepsDelta ?: 0})"
                             } else {
                                 "нет датчика"
                             }
                             tvSensorSteps.text = stepsText
-
-                            // IMU: Азимут + Ориентация
                             val azText = snapshot.azimuth?.let {
                                 String.format(Locale.US, "%.0f°", it)
                             } ?: "—"
@@ -166,6 +174,103 @@ class ScanFragment : Fragment() {
         }
     }
 
+    // ─── Секция завершённых ─────────────────────────────────────────
+
+    private fun updateCompletedSection(completedSessions: List<ScanSession>) {
+        if (completedSessions.isEmpty()) {
+            llCompletedSection.visibility = View.GONE
+            return
+        }
+
+        llCompletedSection.visibility = View.VISIBLE
+        tvCompletedHeader.text = "📋 Завершено: ${completedSessions.size}"
+
+        llCompletedItems.removeAllViews()
+        for (session in completedSessions) {
+            val itemView = LayoutInflater.from(requireContext())
+                .inflate(R.layout.item_completed_task, llCompletedItems, false)
+
+            val tvName = itemView.findViewById<TextView>(R.id.tvCompletedName)
+            val tvDate = itemView.findViewById<TextView>(R.id.tvCompletedDate)
+
+            val name = session.locationName.ifBlank { "Без названия" }
+            tvName.text = "$name  (${session.snapshotCount}⊙ ${session.recordCount}✎)"
+            tvDate.text = "${session.startTime} - ${session.endTime ?: ""}"
+
+            itemView.setOnLongClickListener {
+                showCompletedSessionMenu(session)
+                true
+            }
+
+            llCompletedItems.addView(itemView)
+        }
+
+        llCompletedItems.visibility = if (completedExpanded) View.VISIBLE else View.GONE
+    }
+
+    private fun showCompletedSessionMenu(session: ScanSession) {
+        val items = mutableListOf<ActionSheetItem>()
+
+        items.add(ActionSheetItem("Отправить результат сканирования") {
+            shareSession(session)
+        })
+
+        items.add(ActionSheetItem("Удалить", isDanger = true) {
+            deleteSession(session)
+        })
+
+        UIHelper.showActionSheet(requireContext(), items)
+    }
+
+    private fun shareSession(session: ScanSession) {
+        val csvFile = getSessionCsvFile(session)
+        if (csvFile == null || !csvFile.exists()) {
+            Toast.makeText(requireContext(), "CSV-файл не найден", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val uri = FileProvider.getUriForFile(
+            requireContext(),
+            "${requireContext().packageName}.fileprovider",
+            csvFile
+        )
+
+        val shareIntent = Intent().apply {
+            action = Intent.ACTION_SEND
+            type = "text/csv"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, "Wi-Fi скан: ${session.locationName}")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(shareIntent, "Отправить результат"))
+    }
+
+    private fun deleteSession(session: ScanSession) {
+        val csvFile = getSessionCsvFile(session)
+        if (csvFile != null && csvFile.exists()) {
+            csvFile.delete()
+        }
+        // Удалить из истории
+        val updated = WifiRepository.sessionHistory.value.toMutableList()
+        updated.removeAll { it.id == session.id }
+        // Обновить через reflection (StateFlow private)
+        val field = WifiRepository.javaClass.getDeclaredField("_sessionHistory")
+        field.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val flow = field.get(WifiRepository) as kotlinx.coroutines.flow.MutableStateFlow<List<ScanSession>>
+        flow.value = updated
+
+        Toast.makeText(requireContext(), "Результат удалён", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun getSessionCsvFile(session: ScanSession): File? {
+        val fileName = session.csvFileName ?: return null
+        val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "MyWifiScans")
+        return File(dir, fileName)
+    }
+
+    // ─── Сканирование ───────────────────────────────────────────────
+
     private fun startWifiScanService() {
         if (!checkLocationEnabled()) {
             showLocationDisabledDialog()
@@ -176,9 +281,8 @@ class ScanFragment : Fragment() {
         val notGranted = permissions.filter {
             ActivityCompat.checkSelfPermission(requireContext(), it) != PackageManager.PERMISSION_GRANTED
         }
-        
+
         if (notGranted.isNotEmpty()) {
-            // Explain why we need background location before requesting it
             AlertDialog.Builder(requireContext())
                 .setTitle("Работа в фоновом режиме")
                 .setMessage("Для непрерывной записи маршрута приложению необходимо разрешение на работу в фоне.\n\nВ следующем диалоге выберите «Разрешать всегда» (Allow all the time).")
@@ -189,7 +293,7 @@ class ScanFragment : Fragment() {
                 .show()
             return
         }
-        
+
         executeStartService()
     }
 
@@ -197,9 +301,11 @@ class ScanFragment : Fragment() {
         val intent = Intent(requireContext(), WifiScanService::class.java)
         val locName = etLocation.text.toString().trim()
         val startTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-        
+
+        // Пометить как ручной скан
+        WifiRepository.currentSessionIsManual = true
         WifiRepository.startNewSession(locName, startTime)
-        
+
         intent.putExtra(WifiScanService.EXTRA_LOCATION_NAME, locName)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             requireContext().startForegroundService(intent)
@@ -211,7 +317,7 @@ class ScanFragment : Fragment() {
     private fun stopWifiScanService() {
         val endTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
         WifiRepository.stopSession(endTime)
-        
+
         val intent = Intent(requireContext(), WifiScanService::class.java)
         requireContext().stopService(intent)
     }

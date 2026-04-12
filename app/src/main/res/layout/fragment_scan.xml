@@ -63,14 +63,12 @@
         android:background="?android:attr/selectableItemBackground"
         android:visibility="gone">
 
-        <!-- Колонка: Шаги (PDR) -->
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:orientation="vertical"
             android:gravity="center">
-
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -78,7 +76,6 @@
                 android:textSize="11sp"
                 android:textStyle="bold"
                 android:textColor="?android:attr/textColorSecondary" />
-
             <TextView
                 android:id="@+id/tvSensorSteps"
                 android:layout_width="wrap_content"
@@ -88,7 +85,6 @@
                 android:textColor="?android:attr/textColorPrimary" />
         </LinearLayout>
 
-        <!-- Разделитель -->
         <View
             android:layout_width="1dp"
             android:layout_height="match_parent"
@@ -97,14 +93,12 @@
             android:background="?android:attr/textColorSecondary"
             android:alpha="0.2" />
 
-        <!-- Колонка: Ориентация + Азимут -->
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:orientation="vertical"
             android:gravity="center">
-
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -112,7 +106,6 @@
                 android:textSize="11sp"
                 android:textStyle="bold"
                 android:textColor="?android:attr/textColorSecondary" />
-
             <TextView
                 android:id="@+id/tvSensorImu"
                 android:layout_width="wrap_content"
@@ -123,7 +116,6 @@
                 android:gravity="center" />
         </LinearLayout>
 
-        <!-- Разделитель -->
         <View
             android:layout_width="1dp"
             android:layout_height="match_parent"
@@ -132,14 +124,12 @@
             android:background="?android:attr/textColorSecondary"
             android:alpha="0.2" />
 
-        <!-- Колонка: GPS -->
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:orientation="vertical"
             android:gravity="center">
-
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
@@ -147,7 +137,6 @@
                 android:textSize="11sp"
                 android:textStyle="bold"
                 android:textColor="?android:attr/textColorSecondary" />
-
             <TextView
                 android:id="@+id/tvSensorGps"
                 android:layout_width="wrap_content"
@@ -159,20 +148,39 @@
         </LinearLayout>
     </LinearLayout>
 
-    <TextView
+    <!-- Секция завершённых ручных сканов -->
+    <LinearLayout
+        android:id="@+id/llCompletedSection"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:orientation="vertical"
         android:layout_marginTop="16dp"
-        android:text="История сессий"
-        android:textSize="16sp"
-        android:textStyle="bold" />
+        android:visibility="gone">
 
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/rvHistory"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_marginTop="8dp"
-        android:layout_weight="1"
-        android:nestedScrollingEnabled="true" />
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="?android:attr/listDivider"
+            android:layout_marginBottom="4dp"/>
+
+        <TextView
+            android:id="@+id/tvCompletedHeader"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:gravity="center_vertical"
+            android:paddingStart="4dp"
+            android:paddingEnd="16dp"
+            android:text="📋 Завершено: 0"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:background="?android:attr/selectableItemBackground"/>
+
+        <LinearLayout
+            android:id="@+id/llCompletedItems"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone"/>
+    </LinearLayout>
 
 </LinearLayout>

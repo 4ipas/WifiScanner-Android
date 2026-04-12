@@ -52,7 +52,7 @@ class MainActivity : AppCompatActivity() {
         return when (item.itemId) {
             R.id.action_custom_menu -> {
                 com.example.wifiscanner.utils.UIHelper.showActionSheet(this, listOf(
-                    "Настройки" to {
+                    com.example.wifiscanner.utils.ActionSheetItem("Настройки") {
                         startActivity(Intent(this, SettingsActivity::class.java))
                     }
                 ))
@@ -90,6 +90,7 @@ class MainActivity : AppCompatActivity() {
                 0 -> "Текущие сети"
                 1 -> "Запись"
                 2 -> "Задания"
+                3 -> "История"
                 else -> ""
             }
         }.attach()

@@ -3,6 +3,9 @@
     xmlns:tools="http://schemas.android.com/tools"
     package="com.example.wifiscanner">
 
+    <!-- Network access for downloading tasks from URL -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!-- Location permissions are required for Wi-Fi scanning -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
@@ -56,6 +59,17 @@
             android:name=".WifiScanService"
             android:exported="false"
             android:foregroundServiceType="location|health" />
+
+        <!-- FileProvider для передачи CSV через Share -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>
