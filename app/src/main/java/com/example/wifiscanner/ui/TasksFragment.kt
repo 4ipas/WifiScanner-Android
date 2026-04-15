@@ -31,10 +31,14 @@ import com.example.wifiscanner.utils.CsvLogger
 import com.example.wifiscanner.utils.TaskDownloader
 import com.example.wifiscanner.utils.TaskPersistence
 import com.example.wifiscanner.utils.UIHelper
+import com.example.wifiscanner.cloud.DiskConfig
+import com.example.wifiscanner.cloud.YandexDiskClient
 import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
 import com.google.gson.Gson
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.InputStreamReader
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -49,6 +53,7 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import androidx.preference.PreferenceManager
 import com.example.wifiscanner.utils.PermissionHelper
 
 class TasksFragment : Fragment() {
@@ -184,9 +189,59 @@ class TasksFragment : Fragment() {
             },
             ActionSheetItem("По ссылке") {
                 showUrlLoadDialog()
+            },
+            ActionSheetItem("Обновить с Яндекс Диска") {
+                loadTasksFromYandexDisk()
             }
         )
         UIHelper.showActionSheet(requireContext(), items)
+    }
+
+    private fun loadTasksFromYandexDisk() {
+        val token = DiskConfig.getToken(requireContext())
+        if (token.isBlank()) {
+            Toast.makeText(requireContext(), "Токен не задан. Настройте Яндекс Диск.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        Toast.makeText(requireContext(), "Загрузка списка заданий...", Toast.LENGTH_SHORT).show()
+        viewLifecycleOwner.lifecycleScope.launch {
+            val result = YandexDiskClient.listFiles(token, DiskConfig.TASKS_PATH)
+            if (result.isSuccess) {
+                val files = result.getOrNull() ?: emptyList()
+                val jsonFiles = files.filter { it.name.endsWith(".json") }
+                if (jsonFiles.isEmpty()) {
+                    Toast.makeText(requireContext(), "Папка пуста или нет заданий (.json)", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
+                
+                val names = jsonFiles.map { it.name }.toTypedArray()
+                AlertDialog.Builder(requireContext())
+                    .setTitle("Выберите задание")
+                    .setItems(names) { _, which ->
+                        val selected = jsonFiles[which]
+                        downloadTaskFromYandexDisk(token, selected.path)
+                    }
+                    .setNegativeButton("Отмена", null)
+                    .show()
+            } else {
+                Toast.makeText(requireContext(), "Ошибка: ${result.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun downloadTaskFromYandexDisk(token: String, path: String) {
+        Toast.makeText(requireContext(), "Загрузка файла...", Toast.LENGTH_SHORT).show()
+        viewLifecycleOwner.lifecycleScope.launch {
+            val result = YandexDiskClient.downloadFile(token, path)
+            if (result.isSuccess) {
+                val json = result.getOrNull() ?: ""
+                addTaskFromJson(json)
+                Toast.makeText(requireContext(), "Задание подгружено!", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(requireContext(), "Ошибка: ${result.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     private fun showUrlLoadDialog() {
@@ -841,8 +896,51 @@ class TasksFragment : Fragment() {
                 status.startsWith("COMPLETED") || status == "SKIPPED"
             }
             fabNextLevel.visibility = if (allCompleted) View.VISIBLE else View.GONE
+            
+            if (allCompleted) {
+                uploadEntranceResults()
+            }
         } else {
             fabNextLevel.visibility = View.GONE
+        }
+    }
+
+    private fun uploadEntranceResults() {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
+        if (!prefs.getBoolean("pref_yadisk_auto_upload", true)) return
+        
+        val token = DiskConfig.getToken(requireContext())
+        if (token.isBlank()) return
+
+        val csvFilename = deriveCsvFilenameFromNavStack()
+        val dir = java.io.File(
+            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOCUMENTS),
+            "MyWifiScans"
+        )
+        val file = java.io.File(dir, csvFilename)
+        if (!file.exists()) return
+
+        val lastModified = file.lastModified()
+        val uploadKey = "uploaded_${csvFilename}_${lastModified}"
+        if (prefs.getBoolean(uploadKey, false)) {
+            return // Эта версия файла уже была успешно выгружена
+        }
+
+        Toast.makeText(requireContext(), "Фоновая загрузка результатов на Yandex Disk...", Toast.LENGTH_SHORT).show()
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                val bytes = withContext(Dispatchers.IO) { file.readBytes() }
+                val uploadPath = "${DiskConfig.TASK_RESULTS_PATH}/${file.name}"
+                val result = YandexDiskClient.uploadFile(token, uploadPath, bytes)
+                if (result.isSuccess) {
+                    prefs.edit().putBoolean(uploadKey, true).apply()
+                    Toast.makeText(requireContext(), "Результаты сохранены в облаке ✓", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(requireContext(), "Ошибка загрузки: ${result.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(requireContext(), "Ошибка: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 

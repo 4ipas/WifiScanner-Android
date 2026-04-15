@@ -15,10 +15,12 @@ android {
         applicationId = "com.example.wifiscanner"
         minSdk = 24
         targetSdk = 34
-        versionCode = 6
-        versionName = "4.0.0"
+        versionCode = 8
+        versionName = "5.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        
+        buildConfigField("String", "YANDEX_DISK_TOKEN", "\"y0__xDx-NSEAxjJtUAgnKCIjBd0STQlwF6bzfimJe_X091K4kB10w\"") // Токен Яндекс Диска
     }
 
     buildTypes {
@@ -49,6 +51,7 @@ android {
     }
     buildFeatures {
         viewBinding = true
+        buildConfig = true
     }
 }
 

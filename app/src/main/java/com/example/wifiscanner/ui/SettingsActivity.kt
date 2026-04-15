@@ -4,9 +4,14 @@ import android.os.Bundle
 import android.text.InputType
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import androidx.preference.EditTextPreference
+import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
 import com.example.wifiscanner.R
+import com.example.wifiscanner.cloud.DiskConfig
+import com.example.wifiscanner.cloud.YandexDiskClient
+import kotlinx.coroutines.launch
 
 class SettingsActivity : AppCompatActivity() {
 
@@ -60,6 +65,26 @@ class SettingsActivity : AppCompatActivity() {
             
             bindNumbers(intervalPref)
             bindNumbers(cooldownPref)
+            
+            val testPref: Preference? = findPreference("pref_yadisk_test")
+            testPref?.setOnPreferenceClickListener {
+                val token = DiskConfig.getToken(requireContext())
+                if (token.isBlank()) {
+                    Toast.makeText(requireContext(), "Токен не задан", Toast.LENGTH_SHORT).show()
+                    return@setOnPreferenceClickListener true
+                }
+                
+                Toast.makeText(requireContext(), "Проверка...", Toast.LENGTH_SHORT).show()
+                lifecycleScope.launch {
+                    val result = YandexDiskClient.listFiles(token, "app:/")
+                    if (result.isSuccess) {
+                        Toast.makeText(requireContext(), "Успешно! Доступ к app:/ есть", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(requireContext(), "Ошибка: ${result.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
+                true
+            }
         }
     }
 }

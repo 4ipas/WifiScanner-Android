@@ -33,6 +33,9 @@
     
     <!-- Physical Activity (for Step Counter) -->
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    
+    <!-- Keep CPU awake during background scanning (v4.1.0) -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
         android:allowBackup="true"

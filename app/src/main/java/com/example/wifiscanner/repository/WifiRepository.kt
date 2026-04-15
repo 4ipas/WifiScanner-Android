@@ -64,6 +64,8 @@ object WifiRepository {
     
     /** CSV-файл текущей сессии (для manual scans) */
     var currentSessionCsvFileName: String? = null
+    /** v4.1.0: Имя диагностического CSV-файла текущей сессии */
+    var currentDiagFileName: String? = null
     /** true = ручной скан (вкладка Запись), false = из заданий */
     var currentSessionIsManual: Boolean = false
 

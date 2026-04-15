@@ -26,6 +26,7 @@ import androidx.fragment.app.activityViewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.preference.PreferenceManager
 import com.example.wifiscanner.R
 import com.example.wifiscanner.WifiScanService
 import com.example.wifiscanner.models.ScanSession
@@ -34,8 +35,12 @@ import com.example.wifiscanner.utils.ActionSheetItem
 import com.example.wifiscanner.utils.CsvLogger
 import com.example.wifiscanner.utils.PermissionHelper
 import com.example.wifiscanner.utils.UIHelper
+import com.example.wifiscanner.cloud.DiskConfig
+import com.example.wifiscanner.cloud.YandexDiskClient
 import com.example.wifiscanner.viewmodel.WifiViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -229,18 +234,39 @@ class ScanFragment : Fragment() {
             return
         }
 
-        val uri = FileProvider.getUriForFile(
+        val uris = ArrayList<Uri>()
+        uris.add(FileProvider.getUriForFile(
             requireContext(),
             "${requireContext().packageName}.fileprovider",
             csvFile
-        )
+        ))
 
-        val shareIntent = Intent().apply {
-            action = Intent.ACTION_SEND
-            type = "text/csv"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_SUBJECT, "Wi-Fi скан: ${session.locationName}")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        // v4.1.0: Прикрепляем диагностический лог, если он существует
+        val diagFile = getDiagCsvFile()
+        if (diagFile != null && diagFile.exists()) {
+            uris.add(FileProvider.getUriForFile(
+                requireContext(),
+                "${requireContext().packageName}.fileprovider",
+                diagFile
+            ))
+        }
+
+        val shareIntent = if (uris.size > 1) {
+            Intent().apply {
+                action = Intent.ACTION_SEND_MULTIPLE
+                type = "text/csv"
+                putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+                putExtra(Intent.EXTRA_SUBJECT, "Wi-Fi скан: ${session.locationName}")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        } else {
+            Intent().apply {
+                action = Intent.ACTION_SEND
+                type = "text/csv"
+                putExtra(Intent.EXTRA_STREAM, uris[0])
+                putExtra(Intent.EXTRA_SUBJECT, "Wi-Fi скан: ${session.locationName}")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
         }
         startActivity(Intent.createChooser(shareIntent, "Отправить результат"))
     }
@@ -265,6 +291,13 @@ class ScanFragment : Fragment() {
 
     private fun getSessionCsvFile(session: ScanSession): File? {
         val fileName = session.csvFileName ?: return null
+        val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "MyWifiScans")
+        return File(dir, fileName)
+    }
+
+    /** v4.1.0: Получить файл диагностического лога текущей сессии */
+    private fun getDiagCsvFile(): File? {
+        val fileName = WifiRepository.currentDiagFileName ?: return null
         val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "MyWifiScans")
         return File(dir, fileName)
     }
@@ -320,6 +353,46 @@ class ScanFragment : Fragment() {
 
         val intent = Intent(requireContext(), WifiScanService::class.java)
         requireContext().stopService(intent)
+
+        checkAndUploadToYandexDisk()
+    }
+
+    private fun checkAndUploadToYandexDisk() {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(requireContext())
+        val autoUpload = prefs.getBoolean("pref_yadisk_auto_upload", true)
+        if (!autoUpload) return
+
+        val token = DiskConfig.getToken(requireContext())
+        if (token.isBlank()) return // Если токен не задан, молча пропускаем
+
+        val session = WifiRepository.sessionHistory.value.firstOrNull { it.isManualScan } ?: return
+        val csvFile = getSessionCsvFile(session)
+        val diagFile = getDiagCsvFile()
+
+        if (csvFile == null || !csvFile.exists()) return
+
+        Toast.makeText(requireContext(), "Загрузка на Яндекс Диск...", Toast.LENGTH_SHORT).show()
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                val csvBytes = withContext(Dispatchers.IO) { csvFile.readBytes() }
+                val csvRes = YandexDiskClient.uploadFile(token, "${DiskConfig.SCAN_RESULTS_PATH}/${csvFile.name}", csvBytes)
+                
+                if (csvRes.isFailure) {
+                    Toast.makeText(requireContext(), "Ошибка загрузки: ${csvRes.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
+                    return@launch
+                }
+
+                if (diagFile != null && diagFile.exists()) {
+                    val diagBytes = withContext(Dispatchers.IO) { diagFile.readBytes() }
+                    YandexDiskClient.uploadFile(token, "${DiskConfig.SCAN_RESULTS_PATH}/${diagFile.name}", diagBytes)
+                }
+
+                Toast.makeText(requireContext(), "Успешно загружено на диск ✓", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(requireContext(), "Ошибка: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun checkLocationEnabled(): Boolean {

@@ -14,6 +14,7 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
@@ -27,6 +28,7 @@ import com.google.android.gms.location.Priority
 import com.example.wifiscanner.models.WifiScanResult
 import com.example.wifiscanner.repository.WifiRepository
 import com.example.wifiscanner.utils.CsvLogger
+import com.example.wifiscanner.utils.DiagnosticLogger
 import com.example.wifiscanner.utils.SensorCollector
 import com.example.wifiscanner.utils.frequencyToChannel
 import kotlinx.coroutines.*
@@ -40,6 +42,8 @@ class WifiScanService : Service() {
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var sensorCollector: SensorCollector
     private var serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    // v4.1.0: WakeLock для предотвращения засыпания CPU
+    private var wakeLock: PowerManager.WakeLock? = null
     private var locationName: String? = null
     private var requiredScans: Int? = null
     private var isTaskMode: Boolean = false
@@ -94,6 +98,11 @@ class WifiScanService : Service() {
         sensorCollector = SensorCollector(applicationContext)
         sensorCollector.start()
 
+        // v4.1.0: Инициализация диагностического логгера (перенесено в onStartCommand для доступа к locationName)
+
+        // v4.1.0: Захват WakeLock (PARTIAL) — CPU не спит даже при выключенном экране
+        acquireWakeLock()
+
         createNotificationChannel()
 
         // v3.0.0: Попробовать получить начальные GPS-координаты
@@ -102,6 +111,11 @@ class WifiScanService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         locationName = intent?.getStringExtra(EXTRA_LOCATION_NAME)
+
+        // v4.1.0: Инициализация диагностического логгера (с именем локации в имени файла)
+        DiagnosticLogger.init(applicationContext, locationName)
+        WifiRepository.currentDiagFileName = DiagnosticLogger.getFileName()
+
         isTaskMode = intent?.getBooleanExtra(EXTRA_IS_TASK, false) ?: false
         if (isTaskMode) {
             nodeIdString = intent?.getStringExtra(EXTRA_NODE_ID) ?: ""
@@ -112,9 +126,14 @@ class WifiScanService : Service() {
             WifiRepository.currentSessionCsvFileName = taskCsvFilename
             WifiRepository.currentSessionIsManual = false
         } else {
-            // Генерируем уникальное имя файла для ручного режима: wifi_scan_ddMMyyyy_HH-mm-ss.csv
+            // Генерируем уникальное имя файла для ручного режима: [локация_]wifi_scan_ddMMyyyy_HH-mm-ss.csv
             val timestamp = SimpleDateFormat("ddMMyyyy_HH-mm-ss", Locale.US).format(Date())
-            manualScanFileName = "wifi_scan_$timestamp.csv"
+            val safeLoc = locationName?.trim()?.replace(Regex("[^\\p{L}\\p{N}_\\-]"), "_")?.take(50)
+            manualScanFileName = if (!safeLoc.isNullOrBlank()) {
+                "${safeLoc}_wifi_scan_$timestamp.csv"
+            } else {
+                "wifi_scan_$timestamp.csv"
+            }
             WifiRepository.currentSessionCsvFileName = manualScanFileName
             WifiRepository.currentSessionIsManual = true
         }
@@ -150,6 +169,18 @@ class WifiScanService : Service() {
         }
 
         WifiRepository.setScanning(true)
+
+        // v4.1.0: Логируем старт сервиса со всеми параметрами
+        val intervalSec = sharedPreferences.getString("pref_scan_interval", "5")?.toLongOrNull() ?: 5L
+        val cooldownSec = sharedPreferences.getString("pref_scan_cooldown", "5")?.toLongOrNull() ?: 5L
+        val mode = if (isTaskMode) "task" else "manual"
+        val scansStr = requiredScans?.toString() ?: "unlimited"
+        val wlStatus = if (wakeLock?.isHeld == true) "held" else "not_held"
+        DiagnosticLogger.log(
+            "SERVICE_START",
+            "interval=${intervalSec}s,cooldown=${cooldownSec}s,scans=$scansStr,mode=$mode,wakelock=$wlStatus,location=$locationName",
+            includeDeviceInfo = true
+        )
 
         startPassiveLocationScanning()
         startScanningLoop()
@@ -200,18 +231,35 @@ class WifiScanService : Service() {
                 delay(cooldownSeconds * 1000L)
             }
 
+            // v4.1.0: Heartbeat-счётчик (LOOP_TICK каждые 10 минут)
+            var loopIterations = 0L
+            val intervalSeconds = sharedPreferences.getString("pref_scan_interval", "5")?.toLongOrNull() ?: 5L
+            // Сколько итераций в 10 минутах
+            val tickEveryN = (600L / intervalSeconds.coerceAtLeast(1L)).coerceAtLeast(1L)
+
             while (isActive) {
                 if (wifiManager.isWifiEnabled) {
+                    DiagnosticLogger.log("SCAN_REQUEST")
+
                     @Suppress("DEPRECATION")
                     wifiManager.startScan()
                     
                     delay(2000) // Wait 2s for OS to process our prompt or passive location prompt
                     handleScanResults()
+
+                    loopIterations++
+                    // v4.1.0: Heartbeat каждые ~10 минут
+                    if (loopIterations % tickEveryN == 0L) {
+                        DiagnosticLogger.log(
+                            "LOOP_TICK",
+                            "iterations=$loopIterations,snapshots=${WifiRepository.totalSnapshots.value}"
+                        )
+                    }
                     
-                    val intervalSeconds = sharedPreferences.getString("pref_scan_interval", "5")?.toLongOrNull() ?: 5L
                     val delayMs = (intervalSeconds * 1000) - 2000L // Subtract the 2s we already waited
                     delay(delayMs.coerceAtLeast(1000L))
                 } else {
+                    DiagnosticLogger.log("WIFI_DISABLED")
                     withContext(Dispatchers.Main) {
                         Toast.makeText(applicationContext, "Wi-Fi is disabled", Toast.LENGTH_SHORT).show()
                     }
@@ -225,11 +273,15 @@ class WifiScanService : Service() {
     private fun handleScanResults() {
         serviceScope.launch(Dispatchers.IO) {
             val results = wifiManager.scanResults
-            if (results.isEmpty()) return@launch
+            if (results.isEmpty()) {
+                DiagnosticLogger.log("SCAN_SKIP", "empty_results")
+                return@launch
+            }
             
             val currentMaxTimestamp = results.maxOfOrNull { it.timestamp } ?: 0L
             if (currentMaxTimestamp == lastMaxTimestamp) {
                 // OS hasn't produced a new actual scan, skip logging to avoid duplicates
+                DiagnosticLogger.log("SCAN_SKIP", "duplicate_timestamp")
                 return@launch
             }
             lastMaxTimestamp = currentMaxTimestamp
@@ -285,11 +337,18 @@ class WifiScanService : Service() {
             }
 
             if (mappedResults.isNotEmpty()) {
-                if (isTaskMode) {
-                    CsvLogger.logTasksResults(taskCsvFilename, mappedResults)
-                } else {
-                    // Используем уникальное имя файла с временной меткой
-                    CsvLogger.logResults(manualScanFileName, mappedResults)
+                try {
+                    if (isTaskMode) {
+                        CsvLogger.logTasksResults(taskCsvFilename, mappedResults)
+                    } else {
+                        // Используем уникальное имя файла с временной меткой
+                        CsvLogger.logResults(manualScanFileName, mappedResults)
+                    }
+                    // v4.1.0: Логируем успешный результат
+                    val maxRssi = mappedResults.maxOfOrNull { it.rssi } ?: 0
+                    DiagnosticLogger.log("SCAN_RESULT", "networks=${mappedResults.size},maxRssi=$maxRssi")
+                } catch (e: Exception) {
+                    DiagnosticLogger.log("SCAN_ERROR", "csv_write: ${e.message}")
                 }
             }
             // Update Repository UI
@@ -318,10 +377,21 @@ class WifiScanService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+
+        // v4.1.0: Логируем остановку сервиса
+        DiagnosticLogger.log(
+            "SERVICE_STOP",
+            "snapshots=${WifiRepository.totalSnapshots.value},records=${WifiRepository.totalRecords.value}"
+        )
+
         serviceScope.cancel()
 
         // v3.0.0: Остановить сбор IMU-данных
         sensorCollector.stop()
+
+        // v4.1.0: Освободить WakeLock
+        releaseWakeLock()
+        DiagnosticLogger.release()
 
         try {
             fusedLocationClient.removeLocationUpdates(locationCallback)
@@ -332,6 +402,36 @@ class WifiScanService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    // v4.1.0: WakeLock management
+    private fun acquireWakeLock() {
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "WifiScanner:ScanLock"
+            ).apply {
+                acquire()
+            }
+            DiagnosticLogger.log("WAKELOCK_ACQ", "success")
+        } catch (e: Exception) {
+            DiagnosticLogger.log("WAKELOCK_ACQ", "fail: ${e.message}")
+        }
+    }
+
+    private fun releaseWakeLock() {
+        try {
+            wakeLock?.let {
+                if (it.isHeld) {
+                    it.release()
+                    DiagnosticLogger.log("WAKELOCK_REL")
+                }
+            }
+            wakeLock = null
+        } catch (e: Exception) {
+            DiagnosticLogger.log("WAKELOCK_REL", "error: ${e.message}")
+        }
+    }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

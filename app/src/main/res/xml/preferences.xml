@@ -20,4 +20,28 @@
             app:defaultValue="5"
             app:iconSpaceReserved="false" />
     </PreferenceCategory>
+
+    <PreferenceCategory 
+        app:title="Яндекс Диск"
+        app:iconSpaceReserved="false">
+        <androidx.preference.EditTextPreference
+            app:key="pref_yadisk_token"
+            app:title="OAuth токен"
+            app:summary="Пусто = использовать встроенный токен"
+            app:dialogTitle="Ввести токен Яндекс Диска"
+            app:iconSpaceReserved="false" />
+            
+        <androidx.preference.SwitchPreferenceCompat
+            app:key="pref_yadisk_auto_upload"
+            app:title="Автозагрузка на Яндекс Диск"
+            app:summary="Автоматически загружать результаты после завершения сканирования"
+            app:defaultValue="true"
+            app:iconSpaceReserved="false" />
+
+        <androidx.preference.Preference
+            app:key="pref_yadisk_test"
+            app:title="Проверить подключение"
+            app:summary="Нажмите для проверки доступа к папке app:/"
+            app:iconSpaceReserved="false" />
+    </PreferenceCategory>
 </PreferenceScreen>

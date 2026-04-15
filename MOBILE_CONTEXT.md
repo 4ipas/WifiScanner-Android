@@ -1,6 +1,14 @@
 # Контекст мобильного приложения (WifiScanner)
 
-## Версия 3 (Текущая) - [05.04.2026] (Smart Tasks UX & Sensor UI Polish)
+## Версия 4 (Текущая) - [15.04.2026] (Yandex Disk Automation)
+### 1. Архитектура Обмена Данными (Yandex Disk REST API)
+- Внедрен HTTP-клиент `YandexDiskClient.kt` (`java.net.HttpURLConnection`, Kotlin Coroutines), работающий исключительно с изолированной областью `app:/` (scope: `cloud_api:disk.app_folder`), обеспечивая безопасность личного диска пользователя.
+- **Автоматизация Заданий (Tasks)**: В `TasksFragment` интегрирована загрузка файлов напрямую из облака `app:/tasks/`. При завершении всех локаций внутри объекта "Подъезд" файлы CSV **автоматически** выгружаются в `app:/results/` в фоновом режиме.
+- **Автоматизация Свободного Поиска (Scan)**: При остановке ручного сканирования (`ScanFragment`) CSV файл с результатами (вместе с диагностическим логом) **автоматически** выгружается в `app:/results/`. 
+- **Настройки OAuth**: Токен зашит в `BuildConfig.YANDEX_DISK_TOKEN` по умолчанию, но может быть переопределен пользователем через "Настройки".
+
+---
+## Версия 3 (Предыдущая) - [05.04.2026] (Smart Tasks UX & Sensor UI Polish)
 ### 1. Архитектура и UI (Data-Science Grade Interface)
 - Изменен подход к интерфейсу "Заданий" (Smart Tasks): Плоские списки заменены на **объемные Material Cards** (`androidx.cardview.widget.CardView` с радиусом 8dp и тенью 4dp), обеспечивая полное соответствие "Истории сессий".
 - **Динамическая Навигация (Displacement)**: Исключены визуальные коллизии снизу экрана. Кнопка новой локации перенесена в Breadcrumbs верхнего бара (`[ + ]`). Кнопка `[⬇ СЛЕДУЮЩИЙ ЭТАЖ]` всплывает снизу из пустоты только после завершения всех текущих локаций на этаже.
@@ -32,7 +40,7 @@ Channel; NetworkTimestamp; Latitude; Longitude; StepsDelta; StepsTotal; Azimuth;
 ```
 
 ---
-## Версия 2 (Предыдущая) - [04.04.2026] (Итерация 4.0.0 prep)
+## Версия 2 (Устаревшая) - [04.04.2026] (Итерация 4.0.0 prep)
 ### 1. Стек технологий и Инфраструктура
 - **Язык**: Kotlin (DLS build.gradle.kts)
 - **Архитектура**: MVVM + Singleton State (WifiRepository) + Foreground Service (Health + Location) + IMU Sensor Fusion
@@ -44,14 +52,4 @@ Channel; NetworkTimestamp; Latitude; Longitude; StepsDelta; StepsTotal; Azimuth;
 2. **IMU/PDR Edge Computing**: `SensorCollector.kt` обрабатывает сырые данные.
 3. **Логирование**: GPS с 7 знаками после запятой (Locale.US). `NetworkTimestamp` синхронизирован на `yyyy-MM-dd HH:mm:ss`. Сети отсортированы по RSSI перед записью `RecordNumber`.
 
----
-## Версия 1 (Устаревшая) - [04.04.2026] (Начало интеграции IMU)
-### 1. Стек технологий
-- **Архитектура**: MVVM + Singleton State
-- **Версия**: 3.0.0 (versionCode 4)
 
-### 2. Принцип работы (Sensor Data v3.0)
-Приложение выполняет обход по загружаемой цифровой карте (JSON).
-1. Автономный `WifiScanService` с обходом лимитов.
-2. Новый модуль `SensorCollector.kt` собирает данные аксессуаров.
-3. В CSV записывается агрегированный снимок (шаги, азимут, ориентация). GPS-якорь кэшируется (6 знаков).
