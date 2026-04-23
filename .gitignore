@@ -17,3 +17,7 @@ local.properties
 # ignore secret key files
 *.jks
 *.keystore
+# JVM crash logs
+hs_err_pid*.log
+replay_pid*.log
+commit_msg.txt
