@@ -44,4 +44,15 @@
             app:summary="Нажмите для проверки доступа к папке app:/"
             app:iconSpaceReserved="false" />
     </PreferenceCategory>
+
+    <PreferenceCategory
+        app:title="Диагностика"
+        app:iconSpaceReserved="false">
+        <androidx.preference.SwitchPreferenceCompat
+            app:key="pref_enable_logging"
+            app:title="Включить логирование"
+            app:summary="Записывает диагностические логи для отладки"
+            app:defaultValue="true"
+            app:iconSpaceReserved="false" />
+    </PreferenceCategory>
 </PreferenceScreen>

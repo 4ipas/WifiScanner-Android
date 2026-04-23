@@ -8,6 +8,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout // [CONTROLLER — TEMPORARY]
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -71,6 +72,17 @@ class TasksFragment : Fragment() {
     private lateinit var tvCompletedHeader: TextView
     private lateinit var llCompletedItems: LinearLayout
     private var completedExpanded = false
+
+    // [CONTROLLER MODE — TEMPORARY]
+    private lateinit var btnControllerToggle: Button
+    private lateinit var controllerContainer: FrameLayout
+    private var controllerFragment: ControllerFragment? = null
+    private var isControllerMode = false
+    // [/CONTROLLER MODE]
+
+    // v5.1.0: WiFi мониторинг
+    private var wifiMonitor: com.example.wifiscanner.utils.WifiStateMonitor? = null
+    private var wifiAlertShowing = false
     
     private lateinit var adapter: TaskNodeAdapter
 
@@ -152,6 +164,12 @@ class TasksFragment : Fragment() {
             completedExpanded = !completedExpanded
             llCompletedItems.visibility = if (completedExpanded) View.VISIBLE else View.GONE
         }
+
+        // [CONTROLLER MODE — TEMPORARY]
+        btnControllerToggle = view.findViewById(R.id.btnControllerToggle)
+        controllerContainer = view.findViewById(R.id.controllerContainer)
+        btnControllerToggle.setOnClickListener { toggleControllerMode() }
+        // [/CONTROLLER MODE]
 
         restoreState()
         observeScanning()
@@ -292,6 +310,8 @@ class TasksFragment : Fragment() {
                             if (count >= task.requiredScans) {
                                 if (!task.status.startsWith("COMPLETED")) {
                                     task.status = "COMPLETED_$records"
+                                    // v5.1.0: Логирование
+                                    com.example.wifiscanner.utils.DiagnosticLogger.log("TASK_COMPLETED", "node=${node.name},records=$records")
                                     stopWifiScanService()
                                     activeScanNode = null
                                     WifiRepository.activeScanCsvFilename = null
@@ -352,13 +372,20 @@ class TasksFragment : Fragment() {
         }
     }
 
-    /** Добавляет задание в список. Не заменяет существующие. */
+    /** Добавляет задание в список. Не заменяет существующие.
+     *  v5.2.0: Всегда вызывает deepCopyWithReset() для генерации уникальных UUID.
+     *  Это гарантирует, что повторная загрузка того же JSON создаст независимую копию
+     *  с новыми entranceId → новыми CSV-файлами (Адрес_Подъезд_Дата_Время).
+     */
     private fun addTaskFromJson(jsonString: String) {
-        val newRoot = Gson().fromJson(jsonString, NodeDTO::class.java)
+        val parsed = Gson().fromJson(jsonString, NodeDTO::class.java)
+        val newRoot = parsed.deepCopyWithReset()
         rootNodes.add(newRoot)
         navStack.clear()
         persistState()
         updateUI()
+        // v5.1.0: Логирование
+        com.example.wifiscanner.utils.DiagnosticLogger.log("TASK_LOAD", "name=${newRoot.name},children=${newRoot.children.size}")
     }
     
     private fun saveJsonToUri(uri: android.net.Uri) {
@@ -511,6 +538,8 @@ class TasksFragment : Fragment() {
     private fun executeStartScanForNode(node: NodeDTO) {
         val fullName = getFullLocationName(node)
         val startTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+        // v5.1.0: Логирование
+        com.example.wifiscanner.utils.DiagnosticLogger.log("TASK_SCAN_START", "node=${node.name},fullName=$fullName")
         
         WifiRepository.startNewSession(fullName, startTime)
         
@@ -550,6 +579,9 @@ class TasksFragment : Fragment() {
         }
         
         persistState()
+
+        // v5.1.0: Начать мониторинг WiFi
+        startWifiMonitoring()
     }
     
     private fun stopWifiScanService() {
@@ -559,6 +591,8 @@ class TasksFragment : Fragment() {
             val intent = Intent(requireContext(), WifiScanService::class.java)
             requireContext().stopService(intent)
         }
+        // v5.1.0: Остановить мониторинг WiFi
+        stopWifiMonitoring()
     }
     
     private fun cancelScanForNode(node: NodeDTO) {
@@ -589,6 +623,36 @@ class TasksFragment : Fragment() {
         val entranceName = entranceNode?.name ?: "unknown"
         val entranceId = entranceNode?.id ?: "unknown"
         return WifiRepository.getCsvFilenameForEntrance(entranceId, addressName, entranceName)
+    }
+
+    // v5.1.0: WiFi мониторинг ────────────────────────────────────────
+
+    private fun startWifiMonitoring() {
+        wifiMonitor?.stopMonitoring()
+        wifiMonitor = com.example.wifiscanner.utils.WifiStateMonitor(requireContext()) {
+            activity?.runOnUiThread { showWifiDisabledAlert() }
+        }
+        wifiMonitor?.startMonitoring()
+    }
+
+    private fun stopWifiMonitoring() {
+        wifiMonitor?.stopMonitoring()
+        wifiMonitor = null
+    }
+
+    private fun showWifiDisabledAlert() {
+        if (wifiAlertShowing) return
+        wifiAlertShowing = true
+        AlertDialog.Builder(requireContext())
+            .setTitle("\u26A0\uFE0F WiFi выключен")
+            .setMessage("Включите WiFi для работы приложения.\n\nБез WiFi сканирование невозможно.")
+            .setPositiveButton("Открыть настройки WiFi") { _, _ ->
+                wifiAlertShowing = false
+                startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+            }
+            .setNegativeButton("Ок") { _, _ -> wifiAlertShowing = false }
+            .setCancelable(false)
+            .show()
     }
 
     // ─── Меню узлов ────────────────────────────────────────────────
@@ -926,22 +990,11 @@ class TasksFragment : Fragment() {
             return // Эта версия файла уже была успешно выгружена
         }
 
-        Toast.makeText(requireContext(), "Фоновая загрузка результатов на Yandex Disk...", Toast.LENGTH_SHORT).show()
-        viewLifecycleOwner.lifecycleScope.launch {
-            try {
-                val bytes = withContext(Dispatchers.IO) { file.readBytes() }
-                val uploadPath = "${DiskConfig.TASK_RESULTS_PATH}/${file.name}"
-                val result = YandexDiskClient.uploadFile(token, uploadPath, bytes)
-                if (result.isSuccess) {
-                    prefs.edit().putBoolean(uploadKey, true).apply()
-                    Toast.makeText(requireContext(), "Результаты сохранены в облаке ✓", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(requireContext(), "Ошибка загрузки: ${result.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
-                }
-            } catch (e: Exception) {
-                Toast.makeText(requireContext(), "Ошибка: ${e.message}", Toast.LENGTH_SHORT).show()
-            }
-        }
+        // v5.1.0: Используем очередь загрузки вместо прямого upload
+        val remotePath = "${DiskConfig.TASK_RESULTS_PATH}/${file.name}"
+        com.example.wifiscanner.cloud.UploadQueueManager.enqueue(file.absolutePath, remotePath)
+        prefs.edit().putBoolean(uploadKey, true).apply()
+        Toast.makeText(requireContext(), "Результаты добавлены в очередь загрузки", Toast.LENGTH_SHORT).show()
     }
 
     private fun goToNextLevel() {
@@ -960,4 +1013,81 @@ class TasksFragment : Fragment() {
             }
         }
     }
+
+    // ─── [CONTROLLER MODE — TEMPORARY] ──────────────────────────────
+
+    private fun toggleControllerMode() {
+        if (isControllerMode) {
+            exitControllerMode()
+            return
+        }
+
+        if (rootNodes.isEmpty()) {
+            Toast.makeText(requireContext(), "Сначала загрузите задание", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // Собираем адреса только из НЕЗАВЕРШЁННЫХ заданий
+        val activeRoots = rootNodes.filter { !isFullyCompleted(it) }
+        val allAddresses = mutableListOf<NodeDTO>()
+        for (root in activeRoots) {
+            if (root.nodeType == "ADDRESS") {
+                allAddresses.add(root)
+            } else {
+                allAddresses.addAll(root.children.filter { it.nodeType == "ADDRESS" })
+            }
+        }
+
+        if (allAddresses.isEmpty()) {
+            Toast.makeText(requireContext(), "Нет домов в заданиях", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        enterControllerMode(allAddresses)
+    }
+
+    private fun enterControllerMode(addresses: List<NodeDTO>) {
+        isControllerMode = true
+        btnControllerToggle.text = "📋 Вернуться к заданиям"
+        btnControllerToggle.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF388E3C.toInt())
+
+        // Hide scanner UI
+        view?.findViewById<LinearLayout>(R.id.llTopActions)?.visibility = View.GONE
+        view?.findViewById<LinearLayout>(R.id.llBreadcrumbs)?.visibility = View.GONE
+        rvTasks.visibility = View.GONE
+        llCompletedSection.visibility = View.GONE
+        fabNextLevel.visibility = View.GONE
+
+        // Show controller
+        controllerContainer.visibility = View.VISIBLE
+        controllerFragment = ControllerFragment().also { frag ->
+            frag.onStopSession = { exitControllerMode() }
+            childFragmentManager.beginTransaction()
+                .replace(R.id.controllerContainer, frag)
+                .commit()
+            childFragmentManager.executePendingTransactions()
+            frag.initWithAddresses(addresses)
+        }
+    }
+
+    private fun exitControllerMode() {
+        isControllerMode = false
+        btnControllerToggle.text = "\uD83C\uDFAF Режим контролёра"
+        btnControllerToggle.backgroundTintList = android.content.res.ColorStateList.valueOf(0xFF78909C.toInt())
+
+        // Remove controller fragment
+        controllerFragment?.let {
+            childFragmentManager.beginTransaction().remove(it).commit()
+        }
+        controllerFragment = null
+        controllerContainer.visibility = View.GONE
+
+        // Restore scanner UI
+        view?.findViewById<LinearLayout>(R.id.llTopActions)?.visibility = View.VISIBLE
+        view?.findViewById<LinearLayout>(R.id.llBreadcrumbs)?.visibility = View.VISIBLE
+        rvTasks.visibility = View.VISIBLE
+        updateUI()
+    }
+
+    // ─── [/CONTROLLER MODE] ────────────────────────────────────────
 }

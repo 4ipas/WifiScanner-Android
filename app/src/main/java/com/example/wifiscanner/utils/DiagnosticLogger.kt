@@ -8,8 +8,11 @@ import android.os.Build
 import android.os.Environment
 import android.os.PowerManager
 import android.util.Log
+import androidx.preference.PreferenceManager
 import java.io.File
 import java.io.FileWriter
+import java.io.PrintWriter
+import java.io.StringWriter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -34,12 +37,74 @@ object DiagnosticLogger {
     private var context: Context? = null
 
     /**
+     * v5.1.0: Флаг включения логирования (управляется из настроек).
+     * Краш-логи пишутся ВСЕГДА, даже если enabled=false.
+     */
+    var enabled: Boolean = true
+        private set
+
+    private var globalInitialized = false
+
+    /**
+     * v5.1.0: Глобальная инициализация при старте приложения.
+     * Создаёт файл лога, читает настройку enabled, ставит UncaughtExceptionHandler.
+     * НЕ перезатирается при последующих вызовах init() из сервиса.
+     */
+    fun initGlobal(ctx: Context) {
+        if (globalInitialized) return
+        globalInitialized = true
+        context = ctx.applicationContext
+        serviceStartTimeMs = System.currentTimeMillis()
+
+        // Читаем настройку
+        val prefs = PreferenceManager.getDefaultSharedPreferences(ctx)
+        enabled = prefs.getBoolean("pref_enable_logging", true)
+
+        val timestamp = SimpleDateFormat("ddMMyyyy_HH-mm-ss", Locale.US).format(Date())
+        fileName = "diag_app_$timestamp.csv"
+
+        // Создать файл и записать заголовок
+        val file = getFile() ?: return
+        try {
+            FileWriter(file, false).use { writer ->
+                writer.append(HEADER)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to init global diagnostic file", e)
+        }
+
+        // Перехват необработанных крашей
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                val sw = StringWriter()
+                throwable.printStackTrace(PrintWriter(sw))
+                val stackTrace = sw.toString().take(500).replace(";", ",").replace("\n", " | ")
+                // Краш-лог пишется ВСЕГДА, даже если enabled=false
+                forceLog("APP_CRASH", "thread=${thread.name},err=${throwable.message},stack=$stackTrace", includeDeviceInfo = true)
+            } catch (_: Exception) { /* не падаем в обработчике */ }
+            defaultHandler?.uncaughtException(thread, throwable)
+        }
+
+        if (enabled) {
+            log("APP_START", "global_init", includeDeviceInfo = true)
+        }
+    }
+
+    /**
      * Инициализация логгера при старте сервиса.
-     * Создаёт новый CSV-файл с заголовком.
+     * v5.1.0: Если initGlobal уже вызван — дописывает в тот же файл.
      */
     fun init(ctx: Context, locationName: String? = null) {
         context = ctx.applicationContext
         serviceStartTimeMs = System.currentTimeMillis()
+        
+        // Если initGlobal уже создал файл — дописываем в него
+        if (globalInitialized && fileName != null) {
+            log("SERVICE_INIT", "location=$locationName")
+            return
+        }
+
         val timestamp = SimpleDateFormat("ddMMyyyy_HH-mm-ss", Locale.US).format(Date())
         val safeLoc = locationName?.trim()?.replace(Regex("[^\\p{L}\\p{N}_\\-]"), "_")?.take(50)
         fileName = if (!safeLoc.isNullOrBlank()) {
@@ -61,13 +126,19 @@ object DiagnosticLogger {
 
     /**
      * Записать событие. Thread-safe.
-     *
-     * @param event тип события (SERVICE_START, SCAN_REQUEST, SCAN_RESULT, etc.)
-     * @param detail произвольная строка с деталями
-     * @param includeDeviceInfo true = записать модель и версию Android (только для SERVICE_START)
+     * v5.1.0: Проверяет флаг enabled. Если выключен — не пишет (кроме крашей).
      */
     @Synchronized
     fun log(event: String, detail: String = "", includeDeviceInfo: Boolean = false) {
+        if (!enabled) return
+        forceLog(event, detail, includeDeviceInfo)
+    }
+
+    /**
+     * v5.1.0: Принудительная запись (для крашей — пишет ВСЕГДА).
+     */
+    @Synchronized
+    fun forceLog(event: String, detail: String = "", includeDeviceInfo: Boolean = false) {
         val file = getFile() ?: return
         val ctx = context ?: return
 

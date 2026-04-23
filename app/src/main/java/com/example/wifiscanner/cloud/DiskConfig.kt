@@ -8,6 +8,9 @@ object DiskConfig {
     const val TASKS_PATH = "app:/tasks"
     const val TASK_RESULTS_PATH = "app:/task_results"
     const val SCAN_RESULTS_PATH = "app:/scan_results"
+    const val DIAG_SCANS_PATH = "app:/scan_results/diag_scans"
+    const val DIAG_TASKS_PATH = "app:/task_results/diag_tasks"
+    const val GT_RESULTS_PATH = "app:/ground_truth" // [CONTROLLER MODE — TEMPORARY]
     
     // Токен загружается из настроек (приоритет) либо берется из BuildConfig по умолчанию
     fun getToken(context: Context): String {

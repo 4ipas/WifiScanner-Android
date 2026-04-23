@@ -5,8 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.pm.ServiceInfo
 import android.location.Location
@@ -31,6 +33,8 @@ import com.example.wifiscanner.utils.CsvLogger
 import com.example.wifiscanner.utils.DiagnosticLogger
 import com.example.wifiscanner.utils.SensorCollector
 import com.example.wifiscanner.utils.frequencyToChannel
+import com.example.wifiscanner.cloud.IncrementalSyncer
+import com.example.wifiscanner.cloud.DiskConfig
 import kotlinx.coroutines.*
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -53,7 +57,31 @@ class WifiScanService : Service() {
     private var floorString: String = ""
     private var taskCsvFilename: String = ""
     private var globalRecordNumber: Long = 0L
+    private var incrementalSyncer: IncrementalSyncer? = null
+    private var diagSyncer: IncrementalSyncer? = null
     private var lastMaxTimestamp: Long = 0L
+
+    // v5.2.0: BroadcastReceiver для логирования WiFi on/off в диагностику
+    private val wifiStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(ctx: Context?, intent: Intent?) {
+            if (intent?.action != WifiManager.WIFI_STATE_CHANGED_ACTION) return
+            val state = intent.getIntExtra(WifiManager.EXTRA_WIFI_STATE, WifiManager.WIFI_STATE_UNKNOWN)
+            when (state) {
+                WifiManager.WIFI_STATE_ENABLED -> {
+                    DiagnosticLogger.log("WIFI_STATE", "enabled")
+                }
+                WifiManager.WIFI_STATE_DISABLED -> {
+                    DiagnosticLogger.log("WIFI_STATE", "disabled")
+                }
+                WifiManager.WIFI_STATE_ENABLING -> {
+                    DiagnosticLogger.log("WIFI_STATE", "enabling")
+                }
+                WifiManager.WIFI_STATE_DISABLING -> {
+                    DiagnosticLogger.log("WIFI_STATE", "disabling")
+                }
+            }
+        }
+    }
     private lateinit var sharedPreferences: SharedPreferences
 
     // v3.0.0: Кэшированные GPS-координаты
@@ -107,6 +135,9 @@ class WifiScanService : Service() {
 
         // v3.0.0: Попробовать получить начальные GPS-координаты
         fetchInitialLocation()
+
+        // v5.2.0: Регистрация WiFi state receiver для диагностики
+        registerWifiStateReceiver()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -125,6 +156,9 @@ class WifiScanService : Service() {
             taskCsvFilename = intent?.getStringExtra(EXTRA_CSV_FILENAME) ?: "wifi_tasks_default.csv"
             WifiRepository.currentSessionCsvFileName = taskCsvFilename
             WifiRepository.currentSessionIsManual = false
+
+            // Инкрементальная синхронизация с Яндекс.Диском (режим заданий)
+            initIncrementalSyncer(taskCsvFilename, DiskConfig.TASK_RESULTS_PATH)
         } else {
             // Генерируем уникальное имя файла для ручного режима: [локация_]wifi_scan_ddMMyyyy_HH-mm-ss.csv
             val timestamp = SimpleDateFormat("ddMMyyyy_HH-mm-ss", Locale.US).format(Date())
@@ -136,6 +170,9 @@ class WifiScanService : Service() {
             }
             WifiRepository.currentSessionCsvFileName = manualScanFileName
             WifiRepository.currentSessionIsManual = true
+
+            // Инкрементальная синхронизация с Яндекс.Диском (только для ручного режима)
+            initIncrementalSyncer(manualScanFileName, DiskConfig.SCAN_RESULTS_PATH)
         }
         
         if (intent?.hasExtra(EXTRA_REQUIRED_SCANS) == true) {
@@ -347,6 +384,10 @@ class WifiScanService : Service() {
                     // v4.1.0: Логируем успешный результат
                     val maxRssi = mappedResults.maxOfOrNull { it.rssi } ?: 0
                     DiagnosticLogger.log("SCAN_RESULT", "networks=${mappedResults.size},maxRssi=$maxRssi")
+
+                    // v5.2.0: Инкрементальная синхронизация с Яндекс.Диском
+                    incrementalSyncer?.onSnapshotWritten()
+                    diagSyncer?.onSnapshotWritten()
                 } catch (e: Exception) {
                     DiagnosticLogger.log("SCAN_ERROR", "csv_write: ${e.message}")
                 }
@@ -366,11 +407,16 @@ class WifiScanService : Service() {
             // Limit viewable results memory
             WifiRepository.updateResults(mappedResults.take(20))
             
+            // v5.2.1: В task-режиме НЕ вызываем stopSelf() — управление жизненным циклом
+            // делегировано TasksFragment.observeScanning() через stopWifiScanService().
+            // Это устраняет race condition между IO thread (здесь) и Main thread (observeScanning),
+            // который приводил к преждевременному onDestroy() и ANR при flush().
+            // Для ручного режима без задания — останавливаем сами.
             val req = requiredScans
-            if (req != null && WifiRepository.totalSnapshots.value >= req) {
+            if (req != null && WifiRepository.totalSnapshots.value >= req && !isTaskMode) {
                 val endTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
                 WifiRepository.stopSession(endTime)
-                stopSelf() // Automatically kill Android Background Service!
+                stopSelf()
             }
         }
     }
@@ -378,13 +424,29 @@ class WifiScanService : Service() {
     override fun onDestroy() {
         super.onDestroy()
 
+        // v5.2.1: Сначала отменяем scanning loop, чтобы не было лишних SCAN_REQUEST
+        // после начала shutdown. Раньше scope отменялся ПОСЛЕ flush(),
+        // что приводило к «призрачным» scan requests в диагностике.
+        serviceScope.cancel()
+
+        // v5.2.1: Неблокирующий flush — делегирует в UploadQueueManager.enqueue().
+        // НИКОГДА не блокирует Main Thread. Файлы будут загружены позже через очередь.
+        incrementalSyncer?.flush()
+        incrementalSyncer?.cancel()
+        incrementalSyncer = null
+
+        diagSyncer?.flush()
+        diagSyncer?.cancel()
+        diagSyncer = null
+
+        // v5.2.0: Отписка от WiFi state receiver
+        unregisterWifiStateReceiver()
+
         // v4.1.0: Логируем остановку сервиса
         DiagnosticLogger.log(
             "SERVICE_STOP",
             "snapshots=${WifiRepository.totalSnapshots.value},records=${WifiRepository.totalRecords.value}"
         )
-
-        serviceScope.cancel()
 
         // v3.0.0: Остановить сбор IMU-данных
         sensorCollector.stop()
@@ -402,6 +464,63 @@ class WifiScanService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    /**
+     * v5.2.0: Инициализация инкрементального синхронизатора.
+     * Создаёт IncrementalSyncer для периодического upload CSV на Яндекс.Диск во время сканирования.
+     */
+    private fun initIncrementalSyncer(csvFileName: String, remoteBasePath: String) {
+        val dir = java.io.File(
+            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOCUMENTS),
+            "MyWifiScans"
+        )
+        val localPath = java.io.File(dir, csvFileName).absolutePath
+        val remotePath = "$remoteBasePath/$csvFileName"
+        incrementalSyncer = IncrementalSyncer(applicationContext, localPath, remotePath)
+        DiagnosticLogger.log("SYNC_INIT", "file=$csvFileName,remote=$remotePath")
+
+        // v5.2.0: Инициализация синхронизатора для diag-файла
+        initDiagSyncer()
+    }
+
+    /**
+     * v5.2.0: Инициализация синхронизатора для файла диагностики.
+     */
+    private fun initDiagSyncer() {
+        val diagFileName = DiagnosticLogger.getFileName() ?: return
+        val dir = java.io.File(
+            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOCUMENTS),
+            "MyWifiScans"
+        )
+        val localPath = java.io.File(dir, diagFileName).absolutePath
+        val diagRemoteBase = if (isTaskMode) DiskConfig.DIAG_TASKS_PATH else DiskConfig.DIAG_SCANS_PATH
+        val remotePath = "$diagRemoteBase/$diagFileName"
+        diagSyncer = IncrementalSyncer(applicationContext, localPath, remotePath)
+        DiagnosticLogger.log("SYNC_DIAG_INIT", "file=$diagFileName,remote=$remotePath")
+    }
+
+    /**
+     * v5.2.0: Регистрация BroadcastReceiver для WiFi on/off событий.
+     */
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
+    private fun registerWifiStateReceiver() {
+        try {
+            val filter = IntentFilter(WifiManager.WIFI_STATE_CHANGED_ACTION)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(wifiStateReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                registerReceiver(wifiStateReceiver, filter)
+            }
+        } catch (e: Exception) {
+            DiagnosticLogger.log("WIFI_RECEIVER_ERROR", "register: ${e.message}")
+        }
+    }
+
+    private fun unregisterWifiStateReceiver() {
+        try {
+            unregisterReceiver(wifiStateReceiver)
+        } catch (_: Exception) { }
+    }
 
     // v4.1.0: WakeLock management
     private fun acquireWakeLock() {

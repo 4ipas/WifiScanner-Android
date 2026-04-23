@@ -67,6 +67,10 @@ class ScanFragment : Fragment() {
     private lateinit var llCompletedItems: LinearLayout
     private var completedExpanded = false
 
+    // v5.1.0: WiFi мониторинг
+    private var wifiMonitor: com.example.wifiscanner.utils.WifiStateMonitor? = null
+    private var wifiAlertShowing = false
+
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -345,16 +349,60 @@ class ScanFragment : Fragment() {
         } else {
             requireContext().startService(intent)
         }
+
+        // v5.1.0: Начать мониторинг WiFi
+        startWifiMonitoring()
     }
 
     private fun stopWifiScanService() {
-        val endTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-        WifiRepository.stopSession(endTime)
-
+        // v5.2.0: Сначала останавливаем сервис, чтобы не появлялись новые scan results.
+        // Затем ждём 500ms, чтобы последний IO-корутин завершил incrementSnapshot/incrementRecords.
+        // Это устраняет race condition: ранее stopSession() фиксировала N-1 снимков,
+        // а UI показывал N (последний корутин успевал инкрементировать после фиксации).
         val intent = Intent(requireContext(), WifiScanService::class.java)
         requireContext().stopService(intent)
 
-        checkAndUploadToYandexDisk()
+        // v5.1.0: Остановить мониторинг WiFi
+        stopWifiMonitoring()
+
+        // Ждём завершения последнего IO-корутина, затем фиксируем сессию
+        viewLifecycleOwner.lifecycleScope.launch {
+            kotlinx.coroutines.delay(500)
+            val endTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+            WifiRepository.stopSession(endTime)
+            checkAndUploadToYandexDisk()
+        }
+    }
+
+    // v5.1.0: WiFi мониторинг ────────────────────────────────────────
+
+    private fun startWifiMonitoring() {
+        wifiMonitor?.stopMonitoring()
+        wifiMonitor = com.example.wifiscanner.utils.WifiStateMonitor(requireContext()) {
+            // Вызывается в UI-потоке при выключении WiFi
+            activity?.runOnUiThread { showWifiDisabledAlert() }
+        }
+        wifiMonitor?.startMonitoring()
+    }
+
+    private fun stopWifiMonitoring() {
+        wifiMonitor?.stopMonitoring()
+        wifiMonitor = null
+    }
+
+    private fun showWifiDisabledAlert() {
+        if (wifiAlertShowing) return
+        wifiAlertShowing = true
+        AlertDialog.Builder(requireContext())
+            .setTitle("\u26A0\uFE0F WiFi выключен")
+            .setMessage("Включите WiFi для работы приложения.\n\nБез WiFi сканирование невозможно.")
+            .setPositiveButton("Открыть настройки WiFi") { _, _ ->
+                wifiAlertShowing = false
+                startActivity(Intent(android.provider.Settings.ACTION_WIFI_SETTINGS))
+            }
+            .setNegativeButton("Ок") { _, _ -> wifiAlertShowing = false }
+            .setCancelable(false)
+            .show()
     }
 
     private fun checkAndUploadToYandexDisk() {
@@ -371,28 +419,20 @@ class ScanFragment : Fragment() {
 
         if (csvFile == null || !csvFile.exists()) return
 
-        Toast.makeText(requireContext(), "Загрузка на Яндекс Диск...", Toast.LENGTH_SHORT).show()
+        // v5.1.0: Используем очередь загрузки вместо прямого upload
+        com.example.wifiscanner.cloud.UploadQueueManager.enqueue(
+            csvFile.absolutePath,
+            "${DiskConfig.SCAN_RESULTS_PATH}/${csvFile.name}"
+        )
 
-        viewLifecycleOwner.lifecycleScope.launch {
-            try {
-                val csvBytes = withContext(Dispatchers.IO) { csvFile.readBytes() }
-                val csvRes = YandexDiskClient.uploadFile(token, "${DiskConfig.SCAN_RESULTS_PATH}/${csvFile.name}", csvBytes)
-                
-                if (csvRes.isFailure) {
-                    Toast.makeText(requireContext(), "Ошибка загрузки: ${csvRes.exceptionOrNull()?.message}", Toast.LENGTH_LONG).show()
-                    return@launch
-                }
-
-                if (diagFile != null && diagFile.exists()) {
-                    val diagBytes = withContext(Dispatchers.IO) { diagFile.readBytes() }
-                    YandexDiskClient.uploadFile(token, "${DiskConfig.SCAN_RESULTS_PATH}/${diagFile.name}", diagBytes)
-                }
-
-                Toast.makeText(requireContext(), "Успешно загружено на диск ✓", Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                Toast.makeText(requireContext(), "Ошибка: ${e.message}", Toast.LENGTH_SHORT).show()
-            }
+        if (diagFile != null && diagFile.exists()) {
+            com.example.wifiscanner.cloud.UploadQueueManager.enqueue(
+                diagFile.absolutePath,
+                "${DiskConfig.DIAG_SCANS_PATH}/${diagFile.name}"
+            )
         }
+
+        Toast.makeText(requireContext(), "Результаты добавлены в очередь загрузки", Toast.LENGTH_SHORT).show()
     }
 
     private fun checkLocationEnabled(): Boolean {

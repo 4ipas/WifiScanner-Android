@@ -5,6 +5,8 @@
 
     <!-- Network access for downloading tasks from URL -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- v5.2.2: Network state monitoring for upload queue retry -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!-- Location permissions are required for Wi-Fi scanning -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />

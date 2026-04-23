@@ -13,6 +13,7 @@ object YandexDiskClient {
     private const val BASE_URL = "https://cloud-api.yandex.net/v1/disk/resources"
     private const val CONNECT_TIMEOUT = 15_000
     private const val READ_TIMEOUT = 15_000
+    private const val UPLOAD_READ_TIMEOUT = 60_000 // v5.2.0: Увеличенный timeout для upload больших файлов
 
     suspend fun listFiles(token: String, remotePath: String): Result<List<DiskFile>> = withContext(Dispatchers.IO) {
         try {
@@ -107,7 +108,7 @@ object YandexDiskClient {
             val connection = url.openConnection() as HttpURLConnection
             connection.setRequestProperty("Authorization", "OAuth $token")
             connection.connectTimeout = CONNECT_TIMEOUT
-            connection.readTimeout = READ_TIMEOUT
+            connection.readTimeout = UPLOAD_READ_TIMEOUT
 
             if (connection.responseCode != HttpURLConnection.HTTP_OK) {
                 val stream = connection.errorStream
@@ -124,7 +125,7 @@ object YandexDiskClient {
             uploadConn.requestMethod = "PUT"
             uploadConn.doOutput = true
             uploadConn.connectTimeout = CONNECT_TIMEOUT
-            uploadConn.readTimeout = READ_TIMEOUT
+            uploadConn.readTimeout = UPLOAD_READ_TIMEOUT
             
             uploadConn.outputStream.use { it.write(data) }
 
@@ -137,4 +138,26 @@ object YandexDiskClient {
             Result.failure(e)
         }
     }
+    // [CONTROLLER MODE — TEMPORARY]
+    suspend fun createFolder(token: String, remotePath: String): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val encodedPath = URLEncoder.encode(remotePath, "UTF-8")
+            val url = URL("$BASE_URL?path=$encodedPath")
+            val connection = url.openConnection() as HttpURLConnection
+            connection.requestMethod = "PUT"
+            connection.setRequestProperty("Authorization", "OAuth $token")
+            connection.connectTimeout = CONNECT_TIMEOUT
+            connection.readTimeout = READ_TIMEOUT
+
+            val code = connection.responseCode
+            if (code in 200..202 || code == 409) { // 409 = already exists
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception("HTTP $code"))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+    // [/CONTROLLER MODE]
 }

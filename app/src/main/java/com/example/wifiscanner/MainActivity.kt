@@ -37,6 +37,13 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        // v5.1.0: Глобальная инициализация логирования (до всего остального)
+        com.example.wifiscanner.utils.DiagnosticLogger.initGlobal(this)
+
+        // v5.1.0: Инициализация очереди загрузки + ретрай зависших файлов
+        com.example.wifiscanner.cloud.UploadQueueManager.init(this)
+        com.example.wifiscanner.cloud.UploadQueueManager.processQueue()
         
         findViewById<Button>(R.id.btnGrantPermission).setOnClickListener {
             requestPermissions()
