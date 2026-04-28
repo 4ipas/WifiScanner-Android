@@ -29,6 +29,7 @@ import com.example.wifiscanner.models.deepCopyWithReset
 import com.example.wifiscanner.repository.WifiRepository
 import com.example.wifiscanner.utils.ActionSheetItem
 import com.example.wifiscanner.utils.CsvLogger
+import com.example.wifiscanner.utils.OemBatteryHelper
 import com.example.wifiscanner.utils.TaskDownloader
 import com.example.wifiscanner.utils.TaskPersistence
 import com.example.wifiscanner.utils.UIHelper
@@ -61,7 +62,6 @@ class TasksFragment : Fragment() {
 
     private lateinit var btnBack: ImageButton
     private lateinit var btnLoadTasks: Button
-    private lateinit var btnSaveTasks: Button
     private lateinit var tvBreadcrumbs: TextView
     private lateinit var rvTasks: RecyclerView
     private lateinit var btnAddLocation: ImageButton
@@ -104,10 +104,6 @@ class TasksFragment : Fragment() {
         uri?.let { loadJsonFromUri(it) }
     }
 
-    private val saveJsonLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-        uri?.let { saveJsonToUri(it) }
-    }
-
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -128,7 +124,6 @@ class TasksFragment : Fragment() {
         
         btnBack = view.findViewById(R.id.btnBack)
         btnLoadTasks = view.findViewById(R.id.btnLoadTasks)
-        btnSaveTasks = view.findViewById(R.id.btnSaveTasks)
         tvBreadcrumbs = view.findViewById(R.id.tvBreadcrumbs)
         rvTasks = view.findViewById(R.id.rvTasks)
         btnAddLocation = view.findViewById(R.id.btnAddLocation)
@@ -148,12 +143,6 @@ class TasksFragment : Fragment() {
         rvTasks.adapter = adapter
         
         btnLoadTasks.setOnClickListener { showLoadTasksMenu() }
-
-        btnSaveTasks.setOnClickListener {
-            val dateFormat = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault())
-            val filename = "wifi_tasks_result_${dateFormat.format(Date())}.json"
-            saveJsonLauncher.launch(filename)
-        }
         
         btnBack.setOnClickListener { goBack() }
         tvBreadcrumbs.setOnClickListener { goBack() }
@@ -388,20 +377,6 @@ class TasksFragment : Fragment() {
         com.example.wifiscanner.utils.DiagnosticLogger.log("TASK_LOAD", "name=${newRoot.name},children=${newRoot.children.size}")
     }
     
-    private fun saveJsonToUri(uri: android.net.Uri) {
-        try {
-            val outputStream = requireContext().contentResolver.openOutputStream(uri)
-            val writer = java.io.OutputStreamWriter(outputStream!!)
-            val gson = com.google.gson.GsonBuilder().setPrettyPrinting().create()
-            val jsonString = gson.toJson(rootNodes)
-            writer.write(jsonString)
-            writer.close()
-            Toast.makeText(requireContext(), "Файл успешно сохранен!", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            e.printStackTrace()
-            Toast.makeText(requireContext(), "Ошибка при сохранении", Toast.LENGTH_SHORT).show()
-        }
-    }
 
     // ─── Навигация ─────────────────────────────────────────────────
     
@@ -532,7 +507,14 @@ class TasksFragment : Fragment() {
             return
         }
         
-        executeStartScanForNode(node)
+        // v5.3.0: На Transsion-устройствах показать OEM guide перед первым сканом
+        if (OemBatteryHelper.shouldShowGuide(requireContext())) {
+            OemBatteryHelper.showTranssionGuide(requireContext()) {
+                executeStartScanForNode(node)
+            }
+        } else {
+            executeStartScanForNode(node)
+        }
     }
 
     private fun executeStartScanForNode(node: NodeDTO) {

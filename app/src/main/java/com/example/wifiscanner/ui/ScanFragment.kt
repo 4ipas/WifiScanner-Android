@@ -37,6 +37,7 @@ import com.example.wifiscanner.utils.PermissionHelper
 import com.example.wifiscanner.utils.UIHelper
 import com.example.wifiscanner.cloud.DiskConfig
 import com.example.wifiscanner.cloud.YandexDiskClient
+import com.example.wifiscanner.utils.OemBatteryHelper
 import com.example.wifiscanner.viewmodel.WifiViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -335,6 +336,17 @@ class ScanFragment : Fragment() {
     }
 
     private fun executeStartService() {
+        // v5.3.0: На Transsion-устройствах (TECNO/Infinix/Itel) показать OEM guide перед стартом
+        if (OemBatteryHelper.shouldShowGuide(requireContext())) {
+            OemBatteryHelper.showTranssionGuide(requireContext()) {
+                doStartService()
+            }
+        } else {
+            doStartService()
+        }
+    }
+
+    private fun doStartService() {
         val intent = Intent(requireContext(), WifiScanService::class.java)
         val locName = etLocation.text.toString().trim()
         val startTime = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())

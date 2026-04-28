@@ -117,12 +117,13 @@ class ControllerFragment : Fragment() {
         for (address in allAddresses) {
             val btn = MaterialButton(requireContext(), null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
                 text = address.name
-                textSize = 13f
+                textSize = 12f
                 isAllCaps = false
+                setPadding(8.dpToPx(), 0, 8.dpToPx(), 0)
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { marginEnd = 8 }
+                ).apply { marginEnd = 6 }
                 setOnClickListener { selectAddress(address) }
             }
             llAddressSelector.addView(btn)
@@ -168,12 +169,13 @@ class ControllerFragment : Fragment() {
         for (entrance in entrances) {
             val btn = MaterialButton(requireContext(), null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
                 text = entrance.name.replace("Подъезд ", "П")
-                textSize = 14f
+                textSize = 13f
                 isAllCaps = false
+                setPadding(8.dpToPx(), 0, 8.dpToPx(), 0)
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { marginEnd = 8 }
+                ).apply { marginEnd = 6 }
                 setOnClickListener { selectEntrance(entrance) }
             }
             llEntranceSelector.addView(btn)
@@ -203,7 +205,8 @@ class ControllerFragment : Fragment() {
 
     private fun buildFloorButtons(floors: List<NodeDTO>) {
         llFloorGrid.removeAllViews()
-        val cols = 3
+        // v5.3.0: Адаптивное кол-во колонок — 4 для компактности на узких экранах
+        val cols = 4
         var row: LinearLayout? = null
 
         for ((index, floor) in floors.withIndex()) {
@@ -213,19 +216,21 @@ class ControllerFragment : Fragment() {
                     layoutParams = LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT
-                    ).apply { bottomMargin = 6 }
+                    ).apply { bottomMargin = 4 }
                 }
                 llFloorGrid.addView(row)
             }
 
             val btn = MaterialButton(requireContext()).apply {
                 text = floor.name
-                textSize = 14f
+                textSize = 13f
                 isAllCaps = false
                 cornerRadius = 8.dpToPx()
+                // v5.3.0: Уменьшенная высота для компактности, padding для отступа текста
+                setPadding(4.dpToPx(), 0, 4.dpToPx(), 0)
                 layoutParams = LinearLayout.LayoutParams(
-                    0, 52.dpToPx(), 1f
-                ).apply { marginEnd = 6; marginStart = 6 }
+                    0, 44.dpToPx(), 1f
+                ).apply { marginEnd = 4; marginStart = 4 }
                 setOnClickListener { recordCheckpoint(floor.name) }
             }
             row?.addView(btn)
@@ -236,7 +241,7 @@ class ControllerFragment : Fragment() {
         if (remainder != 0 && row != null) {
             for (i in remainder until cols) {
                 val spacer = View(requireContext()).apply {
-                    layoutParams = LinearLayout.LayoutParams(0, 1, 1f).apply { marginEnd = 6; marginStart = 6 }
+                    layoutParams = LinearLayout.LayoutParams(0, 1, 1f).apply { marginEnd = 4; marginStart = 4 }
                 }
                 row.addView(spacer)
             }

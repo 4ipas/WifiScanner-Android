@@ -39,6 +39,9 @@
     <!-- Keep CPU awake during background scanning (v4.1.0) -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- v5.3.0: Exempt from Doze mode — required for stable scanning on TECNO/HiOS -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <application
         android:allowBackup="true"
         android:label="@string/app_name"
@@ -47,7 +50,9 @@
         tools:targetApi="34">
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -57,6 +62,8 @@
         <activity
             android:name=".ui.SettingsActivity"
             android:label="Настройки"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:parentActivityName=".MainActivity" />
 
         <!-- Фоновая служба для постоянного сканирования -->

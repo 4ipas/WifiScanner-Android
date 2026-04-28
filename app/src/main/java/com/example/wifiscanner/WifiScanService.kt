@@ -31,6 +31,7 @@ import com.example.wifiscanner.models.WifiScanResult
 import com.example.wifiscanner.repository.WifiRepository
 import com.example.wifiscanner.utils.CsvLogger
 import com.example.wifiscanner.utils.DiagnosticLogger
+import com.example.wifiscanner.utils.OemBatteryHelper
 import com.example.wifiscanner.utils.SensorCollector
 import com.example.wifiscanner.utils.frequencyToChannel
 import com.example.wifiscanner.cloud.IncrementalSyncer
@@ -131,6 +132,11 @@ class WifiScanService : Service() {
         // v4.1.0: Захват WakeLock (PARTIAL) — CPU не спит даже при выключенном экране
         acquireWakeLock()
 
+        // v5.3.0: Запрос исключения из Doze (системный in-app диалог)
+        // На TECNO/HiOS Doze активируется за 4 мин и замораживает delay() в scanning loop.
+        // Whitelist снимает ограничения Doze → WakeLock работает корректно.
+        OemBatteryHelper.requestBatteryWhitelist(applicationContext)
+
         createNotificationChannel()
 
         // v3.0.0: Попробовать получить начальные GPS-координаты
@@ -213,9 +219,10 @@ class WifiScanService : Service() {
         val mode = if (isTaskMode) "task" else "manual"
         val scansStr = requiredScans?.toString() ?: "unlimited"
         val wlStatus = if (wakeLock?.isHeld == true) "held" else "not_held"
+        val battWhitelist = if (OemBatteryHelper.isIgnoringBatteryOptimizations(this)) "yes" else "no"
         DiagnosticLogger.log(
             "SERVICE_START",
-            "interval=${intervalSec}s,cooldown=${cooldownSec}s,scans=$scansStr,mode=$mode,wakelock=$wlStatus,location=$locationName",
+            "interval=${intervalSec}s,cooldown=${cooldownSec}s,scans=$scansStr,mode=$mode,wakelock=$wlStatus,battWhitelist=$battWhitelist,location=$locationName",
             includeDeviceInfo = true
         )
 

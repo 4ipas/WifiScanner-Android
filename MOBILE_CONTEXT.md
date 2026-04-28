@@ -1,11 +1,11 @@
 # Контекст мобильного приложения (WifiScanner)
 
-## Версия 5 (Текущая) - [22.04.2026] (Full Snapshot: Offline-First Sync + ANR Fix + Diagnostics)
+## Версия 5 (Текущая) - [28.04.2026] (Full Snapshot: Doze Fix + Permissions Onboarding)
 
 ### 1. Стек технологий и Инфраструктура
 - **Язык**: Kotlin (DSL `build.gradle.kts`)
 - **Архитектура**: MVVM + Singleton State (`WifiRepository`) + Foreground Service (`LOCATION` + `HEALTH`) + IMU Sensor Fusion + Yandex Disk Cloud Sync + Offline-First Upload Queue
-- **Версия**: 5.1.0 (`versionCode` 9), патч 5.2.1 (ANR fix)
+- **Версия**: 5.3.0 (`versionCode` 11)
 - **SDK**: `compileSdk` 34, `minSdk` 24, `targetSdk` 34
 - **Java**: `sourceCompatibility` / `targetCompatibility` = Java 17
 - **Build Features**: ViewBinding, BuildConfig
@@ -30,8 +30,8 @@
 ### 3. Структура модулей (Package Map)
 ```
 com.example.wifiscanner/
-├── MainActivity.kt              — Точка входа, ViewPager2 + TabLayout (4 вкладки), init UploadQueueManager
-├── WifiScanService.kt           — Foreground Service: Wi-Fi polling + GPS + IMU + WakeLock + IncrementalSync
+├── MainActivity.kt              — Точка входа, ViewPager2 + TabLayout (4 вкладки), Runtime Permissions Onboarding
+├── WifiScanService.kt           — Foreground Service: Wi-Fi polling + GPS + IMU + WakeLock + Doze Whitelist + IncrementalSync
 ├── adapters/
 │   └── ViewPagerAdapter.kt      — Адаптер для 4-х вкладок ViewPager2
 ├── cloud/
@@ -48,6 +48,7 @@ com.example.wifiscanner/
 ├── ui/
 │   ├── ScanFragment.kt          — Вкладка «Запись» (ручное сканирование)
 │   ├── TasksFragment.kt         — Вкладка «Задания» (Smart Tasks с Yandex Disk)
+│   ├── ControllerFragment.kt    — Режим контролёра: кнопки этажей/улица/подъезд + CSV-лог Ground Truth
 │   ├── ViewFragment.kt          — Вкладка «Текущие сети» (live view)
 │   ├── HistoryFragment.kt       — Вкладка «История» (список сессий)
 │   ├── SettingsActivity.kt      — Экран настроек (интервал, cooldown, OAuth-токен)
@@ -61,6 +62,7 @@ com.example.wifiscanner/
 │   ├── SensorCollector.kt       — Сбор IMU-данных (шагомер, азимут, ориентация)
 │   ├── TaskDownloader.kt        — Загрузка JSON-заданий с Yandex Disk
 │   ├── TaskPersistence.kt       — Локальное сохранение дерева заданий (SharedPreferences + Gson)
+│   ├── OemBatteryHelper.kt      — v5.3.0: Doze whitelist + OEM autostart guide (TECNO/Infinix/Itel)
 │   ├── UIHelper.kt              — Action Sheet (Bottom Dialog)
 │   └── WifiStateMonitor.kt      — Реалтайм-мониторинг WiFi on/off через BroadcastReceiver
 └── viewmodel/
@@ -79,10 +81,12 @@ com.example.wifiscanner/
 Внедрена 100% защита от жестких блокировок ОС (Doze Mode и ограничение 4 скана в 2 минуты):
 1. **Foreground Service** (`WifiScanService`): Служба переднего плана типов `TYPE_LOCATION` и `TYPE_HEALTH` (Android 14+), чтобы не «засыпали» шагомер и GPS.
 2. **WakeLock** (`PARTIAL_WAKE_LOCK`): CPU не спит даже при выключенном экране. Захватывается при `onCreate()`, освобождается при `onDestroy()`.
-3. **Троянский конь (FusedLocationProvider)**: Прямые вызовы `wifiManager.startScan()` запрещены (приведут к блокировке сканера на 2 минуты). Служба раз в 5 секунд запрашивает локацию `PRIORITY_HIGH_ACCURACY` у Google Play Services. Высшие привилегии Google аппаратно принуждают включиться Wi-Fi антенну.
-4. **Пассивный Polling**: Приложение бесконечно считывает системный кэш `wifiManager.scanResults`, куда «нечаянно» только что просканировал сервис Google.
-5. **Анти-Дубликаты**: Полностью идентичные слепки (ОС не сканировала, вернула 100% старый кэш) отбраковываются: `if (currentMaxTimestamp == lastMaxTimestamp) { return }`. Счётчик прогресса (1/5) растёт только при реальных обновлениях эфира.
-6. **Защита «Грязного старта» (Cooldown)**: Задержка перед первым сканом (по умолчанию 5 сек, `pref_scan_cooldown`), стабилизирующая телефон и выжигающая кэш-призраки.
+3. **Doze Whitelist** (v5.3.0): `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` — системный in-app диалог при старте сервиса. Без whitelist'а Doze игнорирует WakeLock и замораживает `delay()` в scanning loop (подтверждено на TECNO Pova 7 Ultra / HiOS 15).
+4. **OEM Autostart Guide** (v5.3.0): На Transsion-устройствах (TECNO/Infinix/Itel) — однократный AlertDialog с инструкцией по включению автозапуска в Phone Master.
+5. **Троянский конь (FusedLocationProvider)**: Прямые вызовы `wifiManager.startScan()` запрещены (приведут к блокировке сканера на 2 минуты). Служба раз в 5 секунд запрашивает локацию `PRIORITY_HIGH_ACCURACY` у Google Play Services. Высшие привилегии Google аппаратно принуждают включиться Wi-Fi антенну.
+6. **Пассивный Polling**: Приложение бесконечно считывает системный кэш `wifiManager.scanResults`, куда «нечаянно» только что просканировал сервис Google.
+7. **Анти-Дубликаты**: Полностью идентичные слепки (ОС не сканировала, вернула 100% старый кэш) отбраковываются: `if (currentMaxTimestamp == lastMaxTimestamp) { return }`. Счётчик прогресса (1/5) растёт только при реальных обновлениях эфира.
+8. **Защита «Грязного старта» (Cooldown)**: Задержка перед первым сканом (по умолчанию 5 сек, `pref_scan_cooldown`), стабилизирующая телефон и выжигающая кэш-призраки.
 
 ### 6. IMU/PDR Edge Computing (`SensorCollector.kt`)
 Сырые данные IMU-сенсоров обрабатываются локально с частотой `SENSOR_DELAY_UI`:

@@ -42,15 +42,6 @@
             android:layout_width="match_parent"
             android:layout_height="56dp"
             android:text="Загрузить задания" />
-
-        <Button
-            android:id="@+id/btnSaveTasks"
-            style="@style/Widget.WifiScanner.Button"
-            android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:text="Сохранить прогресс (JSON)"
-            android:layout_marginTop="8dp"
-            android:visibility="gone"/>
     </LinearLayout>
 
     <LinearLayout

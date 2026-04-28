@@ -2,7 +2,29 @@
 
 Все заметные изменения в этом проекте будут описаны в данном файле по семантическому версионированию.
 
-## Версия 5 (Текущая) - [22.04.2026]
+## Версия 5 (Текущая) - [28.04.2026]
+
+### [5.3.0] - 2026-04-28
+#### Добавлено (Doze-защита и Runtime Permissions Onboarding)
+- **Doze Whitelist**: Системный in-app диалог `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` при старте сервиса. Без whitelist'а Doze игнорирует `PARTIAL_WAKE_LOCK` и замораживает `delay()` в scanning loop (подтверждено на TECNO Pova 7 Ultra / HiOS 15, провалы до 37 минут).
+- **OEM Autostart Guide**: Однократный AlertDialog на Transsion-устройствах (TECNO/Infinix/Itel) с инструкцией по включению автозапуска в Phone Master. Детекция через `Build.MANUFACTURER`.
+- **`OemBatteryHelper.kt`** [NEW]: Утилита для детекции OEM, запроса battery whitelist и показа OEM-специфичных гайдов.
+- **Runtime Permissions Onboarding**: Пошаговый запрос всех разрешений при первом запуске (как у Wildberries):
+  1. 📍 Геолокация (`ACCESS_FINE_LOCATION` + `ACCESS_COARSE_LOCATION`)
+  2. 🏃 Физическая активность (`ACTIVITY_RECOGNITION`)
+  3. 🔔 Уведомления (`POST_NOTIFICATIONS`, Android 13+)
+  4. 📍 Фоновая геолокация (`ACCESS_BACKGROUND_LOCATION`)
+  5. 🔋 Исключение из Doze (`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`)
+- **Диагностика**: Поле `battWhitelist=yes/no` в событии `SERVICE_START`.
+
+#### Изменено (Адаптивная вёрстка контролёра)
+- **Компактный layout**: Уменьшены padding (16→12dp), margins, высота кнопок (56→44dp, 48→40dp), размеры шрифтов для комфортного отображения на экранах <6".
+- **4 колонки этажей** вместо 3 — помещается больше информации без прокрутки.
+- **Явный padding** на всех кнопках — текст не упирается в края.
+- Лог: заголовок «Лог чекпоинтов» → «Лог», шрифт 12→11sp.
+
+#### Удалено
+- **«Сохранить прогресс (JSON)»**: Кнопка, лаунчер и функция `saveJsonToUri()` полностью удалены из TasksFragment. Данные сохраняются через CSV + Yandex Disk.
 
 ### [5.2.1] - 2026-04-22
 #### Исправлено (Критическое: ANR-крэши при остановке сервиса)
