@@ -400,7 +400,6 @@ class TasksFragment : Fragment() {
             tvBreadcrumbs.text = "Объекты (Корень)"
             btnBack.visibility = View.GONE
             btnLoadTasks.visibility = View.VISIBLE
-            btnSaveTasks.visibility = if (rootNodes.isNotEmpty()) View.VISIBLE else View.GONE
             btnAddLocation.visibility = View.GONE
 
             // Разделяем на активные и завершённые
@@ -415,7 +414,6 @@ class TasksFragment : Fragment() {
             tvBreadcrumbs.text = "Объекты > $path"
             btnBack.visibility = View.VISIBLE
             btnLoadTasks.visibility = View.GONE
-            btnSaveTasks.visibility = View.GONE
             
             val newList = ArrayList(current.children)
             adapter.submitList(newList)
