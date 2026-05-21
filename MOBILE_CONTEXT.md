@@ -1,11 +1,11 @@
 # Контекст мобильного приложения (WifiScanner)
 
-## Версия 5 (Текущая) - [28.04.2026] (Full Snapshot: Doze Fix + Permissions Onboarding)
+## Актуальный snapshot — v5.3.1 [21.05.2026]
 
 ### 1. Стек технологий и Инфраструктура
 - **Язык**: Kotlin (DSL `build.gradle.kts`)
 - **Архитектура**: MVVM + Singleton State (`WifiRepository`) + Foreground Service (`LOCATION` + `HEALTH`) + IMU Sensor Fusion + Yandex Disk Cloud Sync + Offline-First Upload Queue
-- **Версия**: 5.3.0 (`versionCode` 11)
+- **Версия**: 5.3.1 (`versionCode` 12)
 - **SDK**: `compileSdk` 34, `minSdk` 24, `targetSdk` 34
 - **Java**: `sourceCompatibility` / `targetCompatibility` = Java 17
 - **Build Features**: ViewBinding, BuildConfig
@@ -160,29 +160,4 @@ Timestamp;NodeId;Address;Entrance;Floor;LocationName;SSID;MAC;RSSI;Frequency;Rec
 - **MaterialButton** 56dp + векторные иконки (`Play`/`Stop`).
 - **Smart Locking**: при старте скана кнопки соседних локаций прячутся для предотвращения параллельного сбора.
 - **Компонентный подход**: все UI-элементы — через `component_*.xml` + `styles_components.xml`. Хардкод через `LayoutParams` запрещён.
-
----
-## Версия 4 (Предыдущая) - [16.04.2026] (Full Snapshot: Yandex Disk + Diagnostics + Sensor Fusion)
-### 1. Архитектура
-- MVVM + Singleton State + Foreground Service (LOCATION + HEALTH) + IMU Sensor Fusion + Yandex Disk Cloud Sync
-- Версия 5.0.0 (versionCode 8)
-- compileSdk 34, minSdk 24, targetSdk 34, Java 17
-
-### 2. Ключевые компоненты
-- `WifiScanService.kt` — Foreground Service с Anti-Throttling через FusedLocationProvider
-- `YandexDiskClient.kt` — HTTP-клиент Yandex Disk REST API
-- `DiagnosticLogger.kt` — Событийный CSV-лог
-- `SensorCollector.kt` — Edge Computing IMU/PDR (шагомер + азимут + ориентация)
-- `DiskConfig.kt` — OAuth-токен и пути на Yandex Disk
-
-### 3. UI: 4 вкладки (Текущие сети, Запись, Задания, История)
-### 4. Форматы CSV: 2 формата (Manual + Tasks), 20 полей каждый
-
----
-## Версия 3 (Устаревшая) - [15.04.2026] (Yandex Disk Automation)
-### 1. Архитектура Обмена Данными (Yandex Disk REST API)
-- Внедрен HTTP-клиент `YandexDiskClient.kt` (`java.net.HttpURLConnection`, Kotlin Coroutines), работающий исключительно с изолированной областью `app:/` (scope: `cloud_api:disk.app_folder`), обеспечивая безопасность личного диска пользователя.
-- **Автоматизация Заданий (Tasks)**: В `TasksFragment` интегрирована загрузка файлов напрямую из облака `app:/tasks/`. При завершении всех локаций внутри объекта "Подъезд" файлы CSV **автоматически** выгружаются в `app:/results/` в фоновом режиме.
-- **Автоматизация Свободного Поиска (Scan)**: При остановке ручного сканирования (`ScanFragment`) CSV файл с результатами (вместе с диагностическим логом) **автоматически** выгружается в `app:/results/`. 
-- **Настройки OAuth**: Токен зашит в `BuildConfig.YANDEX_DISK_TOKEN` по умолчанию, но может быть переопределен пользователем через "Настройки".
 
