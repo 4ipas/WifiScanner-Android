@@ -29,11 +29,14 @@ object RemoteConfigManager {
                     val prefs = PreferenceManager.getDefaultSharedPreferences(context)
                     prefs.edit().putString(PREF_CONFIG_JSON, response).apply()
                     Log.d(TAG, "Config fetched successfully: $response")
+                    com.example.wifiscanner.utils.DiagnosticLogger.forceLog("REMOTE_CONFIG", "success, response=$response")
                 } else {
                     Log.e(TAG, "Failed to fetch config: HTTP ${connection.responseCode}")
+                    com.example.wifiscanner.utils.DiagnosticLogger.forceLog("REMOTE_CONFIG", "error HTTP ${connection.responseCode}")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error fetching remote config", e)
+                com.example.wifiscanner.utils.DiagnosticLogger.forceLog("REMOTE_CONFIG", "exception: ${e.javaClass.simpleName} - ${e.message}")
             }
         }
     }

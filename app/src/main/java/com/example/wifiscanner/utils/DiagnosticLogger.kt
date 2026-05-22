@@ -87,7 +87,7 @@ object DiagnosticLogger {
         }
 
         if (enabled) {
-            log("APP_START", "global_init", includeDeviceInfo = true)
+            log("APP_START", "global_init v${com.example.wifiscanner.BuildConfig.VERSION_NAME}", includeDeviceInfo = true)
         }
     }
 
