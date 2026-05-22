@@ -1,11 +1,11 @@
 # Контекст мобильного приложения (WifiScanner)
 
-## Актуальный snapshot — v5.4.0 [22.05.2026]
+## Актуальный snapshot — v5.4.1 [22.05.2026]
 
 ### 1. Стек технологий и Инфраструктура
 - **Язык**: Kotlin (DSL `build.gradle.kts`)
 - **Архитектура**: MVVM + Singleton State (`WifiRepository`) + Foreground Service (`LOCATION` + `HEALTH`) + IMU Sensor Fusion + Yandex Disk Cloud Sync + Offline-First Upload Queue + RemoteConfig
-- **Версия**: 5.4.0 (`versionCode` 13)
+- **Версия**: 5.4.1 (`versionCode` 14)
 - **SDK**: `compileSdk` 34, `minSdk` 24, `targetSdk` 34
 - **Java**: `sourceCompatibility` / `targetCompatibility` = Java 17
 - **Build Features**: ViewBinding, BuildConfig

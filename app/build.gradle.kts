@@ -15,14 +15,14 @@ android {
         applicationId = "com.example.wifiscanner"
         minSdk = 24
         targetSdk = 34
-        versionCode = 13
-        versionName = "5.4.0"
+        versionCode = 14
+        versionName = "5.4.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
         buildConfigField("String", "YANDEX_DISK_TOKEN", "\"y0__xDx-NSEAxjJtUAgnKCIjBd0STQlwF6bzfimJe_X091K4kB10w\"") // Токен Яндекс Диска
         buildConfigField("String", "FEATURE_TOGGLE_URL", "\"http://159.194.216.130:3100/api/v1/config\"")
-        buildConfigField("String", "CONFIG_API_KEY", "\"default_key\"")
+        buildConfigField("String", "CONFIG_API_KEY", "\"pk_23dc554816b743fda31a453e9d32ecf7\"")
     }
 
     buildTypes {
