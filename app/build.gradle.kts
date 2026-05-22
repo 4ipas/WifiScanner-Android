@@ -15,8 +15,8 @@ android {
         applicationId = "com.example.wifiscanner"
         minSdk = 24
         targetSdk = 34
-        versionCode = 16
-        versionName = "5.4.3"
+        versionCode = 17
+        versionName = "5.4.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         

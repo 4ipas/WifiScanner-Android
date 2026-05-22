@@ -99,11 +99,10 @@ object DiagnosticLogger {
         context = ctx.applicationContext
         serviceStartTimeMs = System.currentTimeMillis()
         
-        // Если initGlobal уже создал файл — дописываем в него
-        if (globalInitialized && fileName != null) {
-            log("SERVICE_INIT", "location=$locationName")
-            return
-        }
+        // v5.4.3: Исправлен баг — мы всегда создаём новый файл для новой сессии сканирования, 
+        // даже если глобальный логгер уже инициализирован в MainActivity. 
+        // Иначе все логи писались бы в один глобальный файл diag_app.
+        log("SERVICE_INIT", "location=$locationName")
 
         val timestamp = SimpleDateFormat("ddMMyyyy_HH-mm-ss", Locale.US).format(Date())
         val safeLoc = locationName?.trim()?.replace(Regex("[^\\p{L}\\p{N}_\\-]"), "_")?.take(50)
