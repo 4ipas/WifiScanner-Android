@@ -62,6 +62,26 @@ class WifiScanService : Service() {
     private var diagSyncer: IncrementalSyncer? = null
     private var lastMaxTimestamp: Long = 0L
 
+    // v5.3.1: Hybrid loop properties
+    private var scanThread: Thread? = null
+    @Volatile private var isHybridRunning = false
+    private var watchdogPendingIntent: PendingIntent? = null
+
+    private val watchdogReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == "com.example.wifiscanner.WATCHDOG_TICK") {
+                DiagnosticLogger.log("WATCHDOG", "Tick received, waking CPU")
+                try {
+                    @Suppress("DEPRECATION")
+                    wifiManager.startScan()
+                } catch (e: Exception) {
+                    DiagnosticLogger.log("WATCHDOG_ERR", e.message ?: "unknown")
+                }
+                scheduleWatchdog()
+            }
+        }
+    }
+
     // v5.2.0: BroadcastReceiver для логирования WiFi on/off в диагностику
     private val wifiStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context?, intent: Intent?) {
@@ -268,6 +288,19 @@ class WifiScanService : Service() {
     }
 
     private fun startScanningLoop() {
+        val isHybridEnabled = com.example.wifiscanner.cloud.RemoteConfigManager.isFeatureEnabled(
+            applicationContext, "experimental_alarm_watchdog", false
+        )
+        DiagnosticLogger.log("SCAN_LOOP", "isHybridEnabled=$isHybridEnabled")
+        
+        if (isHybridEnabled) {
+            startHybridScanningLoop()
+        } else {
+            startCoroutineScanningLoop()
+        }
+    }
+
+    private fun startCoroutineScanningLoop() {
         serviceScope.launch {
             // v3.0.0: Охлаждение/Прогрев перед первым сканом (для стабилизации сборщика и ОС)
             val cooldownSeconds = sharedPreferences.getString("pref_scan_cooldown", "5")?.toLongOrNull() ?: 5L
@@ -310,6 +343,104 @@ class WifiScanService : Service() {
                     delay(5000)
                 }
             }
+        }
+    }
+
+    @SuppressLint("ScheduleExactAlarm")
+    private fun scheduleWatchdog() {
+        val am = getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager ?: return
+        if (watchdogPendingIntent == null) {
+            val intent = Intent("com.example.wifiscanner.WATCHDOG_TICK").apply {
+                setPackage(packageName)
+            }
+            watchdogPendingIntent = PendingIntent.getBroadcast(
+                this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+        
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (am.canScheduleExactAlarms()) {
+                    am.setExactAndAllowWhileIdle(
+                        android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                        SystemClock.elapsedRealtime() + 60_000L,
+                        watchdogPendingIntent!!
+                    )
+                } else {
+                    DiagnosticLogger.log("WATCHDOG", "No exact alarm permission")
+                }
+            } else {
+                am.setExactAndAllowWhileIdle(
+                    android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    SystemClock.elapsedRealtime() + 60_000L,
+                    watchdogPendingIntent!!
+                )
+            }
+        } catch (e: SecurityException) {
+            DiagnosticLogger.log("WATCHDOG_ERR", "SecurityException: ${e.message}")
+        }
+    }
+    
+    private fun cancelWatchdog() {
+        watchdogPendingIntent?.let {
+            val am = getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager
+            am?.cancel(it)
+        }
+    }
+
+    private fun startHybridScanningLoop() {
+        isHybridRunning = true
+        
+        val filter = IntentFilter("com.example.wifiscanner.WATCHDOG_TICK")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(watchdogReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(watchdogReceiver, filter)
+        }
+        scheduleWatchdog()
+
+        scanThread = Thread {
+            try {
+                val cooldownSeconds = sharedPreferences.getString("pref_scan_cooldown", "5")?.toLongOrNull() ?: 5L
+                if (cooldownSeconds > 0) {
+                    Thread.sleep(cooldownSeconds * 1000L)
+                }
+
+                var loopIterations = 0L
+                val intervalSeconds = sharedPreferences.getString("pref_scan_interval", "5")?.toLongOrNull() ?: 5L
+                val tickEveryN = (600L / intervalSeconds.coerceAtLeast(1L)).coerceAtLeast(1L)
+
+                while (isHybridRunning) {
+                    if (wifiManager.isWifiEnabled) {
+                        DiagnosticLogger.log("SCAN_REQUEST", "hybrid_thread")
+
+                        @Suppress("DEPRECATION")
+                        wifiManager.startScan()
+                        
+                        Thread.sleep(2000)
+                        handleScanResults()
+
+                        loopIterations++
+                        if (loopIterations % tickEveryN == 0L) {
+                            DiagnosticLogger.log(
+                                "LOOP_TICK",
+                                "hybrid_iterations=$loopIterations,snapshots=${WifiRepository.totalSnapshots.value}"
+                            )
+                        }
+                        
+                        val delayMs = (intervalSeconds * 1000) - 2000L
+                        Thread.sleep(delayMs.coerceAtLeast(1000L))
+                    } else {
+                        DiagnosticLogger.log("WIFI_DISABLED", "hybrid_thread")
+                        Thread.sleep(5000)
+                    }
+                }
+            } catch (e: InterruptedException) {
+                DiagnosticLogger.log("SCAN_LOOP", "hybrid_thread interrupted")
+            }
+        }.apply {
+            name = "HybridScanThread"
+            start()
         }
     }
 
@@ -430,6 +561,14 @@ class WifiScanService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+
+        // v5.3.1: Clean up hybrid loop
+        isHybridRunning = false
+        scanThread?.interrupt()
+        cancelWatchdog()
+        try {
+            unregisterReceiver(watchdogReceiver)
+        } catch (_: Exception) {}
 
         // v5.2.1: Сначала отменяем scanning loop, чтобы не было лишних SCAN_REQUEST
         // после начала shutdown. Раньше scope отменялся ПОСЛЕ flush(),

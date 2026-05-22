@@ -1,11 +1,11 @@
 # Контекст мобильного приложения (WifiScanner)
 
-## Актуальный snapshot — v5.3.1 [21.05.2026]
+## Актуальный snapshot — v5.4.0 [22.05.2026]
 
 ### 1. Стек технологий и Инфраструктура
 - **Язык**: Kotlin (DSL `build.gradle.kts`)
-- **Архитектура**: MVVM + Singleton State (`WifiRepository`) + Foreground Service (`LOCATION` + `HEALTH`) + IMU Sensor Fusion + Yandex Disk Cloud Sync + Offline-First Upload Queue
-- **Версия**: 5.3.1 (`versionCode` 12)
+- **Архитектура**: MVVM + Singleton State (`WifiRepository`) + Foreground Service (`LOCATION` + `HEALTH`) + IMU Sensor Fusion + Yandex Disk Cloud Sync + Offline-First Upload Queue + RemoteConfig
+- **Версия**: 5.4.0 (`versionCode` 13)
 - **SDK**: `compileSdk` 34, `minSdk` 24, `targetSdk` 34
 - **Java**: `sourceCompatibility` / `targetCompatibility` = Java 17
 - **Build Features**: ViewBinding, BuildConfig
@@ -37,6 +37,7 @@ com.example.wifiscanner/
 ├── cloud/
 │   ├── DiskConfig.kt            — Конфигурация OAuth-токена и путей Yandex Disk
 │   ├── IncrementalSyncer.kt     — Периодический re-upload CSV (~30 сек) + неблокирующий flush через очередь
+│   ├── RemoteConfigManager.kt   — Менеджер Feature Toggle (HTTP API), offline-first кэширование
 │   ├── UploadQueueManager.kt    — Персистентная JSON-очередь загрузки (offline-first, ретрай, watchdog)
 │   └── YandexDiskClient.kt      — HTTP-клиент Yandex Disk REST API (list/download/upload/createFolder)
 ├── models/
@@ -81,12 +82,13 @@ com.example.wifiscanner/
 Внедрена 100% защита от жестких блокировок ОС (Doze Mode и ограничение 4 скана в 2 минуты):
 1. **Foreground Service** (`WifiScanService`): Служба переднего плана типов `TYPE_LOCATION` и `TYPE_HEALTH` (Android 14+), чтобы не «засыпали» шагомер и GPS.
 2. **WakeLock** (`PARTIAL_WAKE_LOCK`): CPU не спит даже при выключенном экране. Захватывается при `onCreate()`, освобождается при `onDestroy()`.
-3. **Doze Whitelist** (v5.3.0): `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` — системный in-app диалог при старте сервиса. Без whitelist'а Doze игнорирует WakeLock и замораживает `delay()` в scanning loop (подтверждено на TECNO Pova 7 Ultra / HiOS 15).
+3. **Doze Whitelist** (v5.3.0/v5.4.0): Жесткая проверка `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` при старте сканирования (блокирует старт без белого списка).
 4. **OEM Autostart Guide** (v5.3.0): На Transsion-устройствах (TECNO/Infinix/Itel) — однократный AlertDialog с инструкцией по включению автозапуска в Phone Master.
-5. **Троянский конь (FusedLocationProvider)**: Прямые вызовы `wifiManager.startScan()` запрещены (приведут к блокировке сканера на 2 минуты). Служба раз в 5 секунд запрашивает локацию `PRIORITY_HIGH_ACCURACY` у Google Play Services. Высшие привилегии Google аппаратно принуждают включиться Wi-Fi антенну.
-6. **Пассивный Polling**: Приложение бесконечно считывает системный кэш `wifiManager.scanResults`, куда «нечаянно» только что просканировал сервис Google.
-7. **Анти-Дубликаты**: Полностью идентичные слепки (ОС не сканировала, вернула 100% старый кэш) отбраковываются: `if (currentMaxTimestamp == lastMaxTimestamp) { return }`. Счётчик прогресса (1/5) растёт только при реальных обновлениях эфира.
-8. **Защита «Грязного старта» (Cooldown)**: Задержка перед первым сканом (по умолчанию 5 сек, `pref_scan_cooldown`), стабилизирующая телефон и выжигающая кэш-призраки.
+5. **Hybrid Scanning Loop** (v5.4.0): При активном Feature Toggle `experimental_alarm_watchdog` используется комбинация `Thread.sleep()` и `AlarmManager.setExactAndAllowWhileIdle` для 100% пробуждения из Deep Sleep (в обход зависаний корутин в TECNO/HiOS).
+6. **Троянский конь (FusedLocationProvider)**: Прямые вызовы `wifiManager.startScan()` запрещены (приведут к блокировке сканера на 2 минуты). Служба раз в 5 секунд запрашивает локацию `PRIORITY_HIGH_ACCURACY` у Google Play Services. Высшие привилегии Google аппаратно принуждают включиться Wi-Fi антенну.
+7. **Пассивный Polling**: Приложение бесконечно считывает системный кэш `wifiManager.scanResults`, куда «нечаянно» только что просканировал сервис Google.
+8. **Анти-Дубликаты**: Полностью идентичные слепки (ОС не сканировала, вернула 100% старый кэш) отбраковываются: `if (currentMaxTimestamp == lastMaxTimestamp) { return }`. Счётчик прогресса (1/5) растёт только при реальных обновлениях эфира.
+9. **Защита «Грязного старта» (Cooldown)**: Задержка перед первым сканом (по умолчанию 5 сек, `pref_scan_cooldown`), стабилизирующая телефон и выжигающая кэш-призраки.
 
 ### 6. IMU/PDR Edge Computing (`SensorCollector.kt`)
 Сырые данные IMU-сенсоров обрабатываются локально с частотой `SENSOR_DELAY_UI`:

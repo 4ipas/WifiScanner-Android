@@ -24,6 +24,9 @@ import com.example.wifiscanner.utils.PermissionHelper
 import com.example.wifiscanner.ui.SettingsActivity
 import com.google.android.material.tabs.TabLayout
 import com.google.android.material.tabs.TabLayoutMediator
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
@@ -92,6 +95,11 @@ class MainActivity : AppCompatActivity() {
         // v5.1.0: Инициализация очереди загрузки + ретрай зависших файлов
         com.example.wifiscanner.cloud.UploadQueueManager.init(this)
         com.example.wifiscanner.cloud.UploadQueueManager.processQueue()
+
+        // Fetch Remote Config for feature toggles
+        CoroutineScope(Dispatchers.IO).launch {
+            com.example.wifiscanner.cloud.RemoteConfigManager.fetchConfig(this@MainActivity)
+        }
 
         findViewById<Button>(R.id.btnGrantPermission).setOnClickListener {
             startOnboarding()

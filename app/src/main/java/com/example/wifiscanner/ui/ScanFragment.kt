@@ -315,6 +315,25 @@ class ScanFragment : Fragment() {
             return
         }
 
+        if (!OemBatteryHelper.isIgnoringBatteryOptimizations(requireContext())) {
+            AlertDialog.Builder(requireContext())
+                .setTitle("Энергосбережение")
+                .setMessage("Для работы сканера необходимо добавить приложение в исключения энергосбережения.")
+                .setPositiveButton("В Настройки") { _, _ ->
+                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                        data = Uri.parse("package:${requireContext().packageName}")
+                    }
+                    try {
+                        startActivity(intent)
+                    } catch (e: Exception) {
+                        startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                    }
+                }
+                .setNegativeButton("Отмена", null)
+                .show()
+            return
+        }
+
         val permissions = PermissionHelper.getBackgroundPermissions()
         val notGranted = permissions.filter {
             ActivityCompat.checkSelfPermission(requireContext(), it) != PackageManager.PERMISSION_GRANTED
