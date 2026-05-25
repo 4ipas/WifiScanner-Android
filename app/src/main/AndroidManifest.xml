@@ -42,6 +42,8 @@
     <!-- v5.3.0: Exempt from Doze mode — required for stable scanning on TECNO/HiOS -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- v5.4.5: setAlarmClock() — ядерный watchdog, OEM не может заблокировать -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
     <application
         android:allowBackup="true"

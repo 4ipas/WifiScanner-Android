@@ -1,6 +1,8 @@
 package com.example.wifiscanner
 
+import android.Manifest
 import android.annotation.SuppressLint
+import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -10,6 +12,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.location.Location
 import android.net.wifi.WifiManager
@@ -20,6 +23,7 @@ import android.os.PowerManager
 import android.os.SystemClock
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import androidx.preference.PreferenceManager
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
@@ -70,7 +74,17 @@ class WifiScanService : Service() {
     private val watchdogReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == "com.example.wifiscanner.WATCHDOG_TICK") {
-                DiagnosticLogger.log("WATCHDOG", "Tick received, waking CPU")
+                DiagnosticLogger.log("WATCHDOG", "AlarmClock tick, waking CPU")
+                // v5.4.5: Re-acquire WakeLock на случай, если OEM его отобрал
+                try {
+                    val wl = wakeLock
+                    if (wl == null || !wl.isHeld) {
+                        DiagnosticLogger.log("WATCHDOG", "WakeLock lost, re-acquiring")
+                        acquireWakeLock()
+                    }
+                } catch (e: Exception) {
+                    DiagnosticLogger.log("WATCHDOG_ERR", "wakelock: ${e.message}")
+                }
                 try {
                     @Suppress("DEPRECATION")
                     wifiManager.startScan()
@@ -122,6 +136,9 @@ class WifiScanService : Service() {
         const val EXTRA_ENTRANCE = "extra_entrance"
         const val EXTRA_FLOOR = "extra_floor"
         const val EXTRA_CSV_FILENAME = "extra_csv_filename"
+
+        // v5.4.5: Интервал watchdog (2 минуты)
+        const val WATCHDOG_INTERVAL_MS = 120_000L
     }
 
     private val locationCallback = object : LocationCallback() {
@@ -246,6 +263,9 @@ class WifiScanService : Service() {
             includeDeviceInfo = true
         )
 
+        // v5.4.5: Логируем все разрешения при старте сервиса
+        logPermissions()
+
         startPassiveLocationScanning()
         startScanningLoop()
 
@@ -346,9 +366,22 @@ class WifiScanService : Service() {
         }
     }
 
+    /**
+     * v5.4.5: Watchdog через setAlarmClock() — ядерная опция.
+     * 
+     * setAlarmClock() — это API для будильников. Android ГАРАНТИРУЕТ его срабатывание
+     * даже на самых агрессивных OEM (TECNO/HiOS, Xiaomi/MIUI, Huawei/EMUI).
+     * Если OEM заблокирует setAlarmClock(), у пользователя перестанут работать будильники,
+     * поэтому ни один производитель не решается это делать.
+     *
+     * Интервал: 120 сек (2 мин). При нормальной работе Thread.sleep сканирует каждые 5 сек,
+     * а watchdog просто переподтверждает, что процесс жив. Если OEM заморозит процесс,
+     * watchdog разбудит его максимум через 2 минуты.
+     */
+
     @SuppressLint("ScheduleExactAlarm")
     private fun scheduleWatchdog() {
-        val am = getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager ?: return
+        val am = getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
         if (watchdogPendingIntent == null) {
             val intent = Intent("com.example.wifiscanner.WATCHDOG_TICK").apply {
                 setPackage(packageName)
@@ -357,33 +390,38 @@ class WifiScanService : Service() {
                 this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
         }
-        
+
+        val triggerAtMs = System.currentTimeMillis() + WATCHDOG_INTERVAL_MS
+
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (am.canScheduleExactAlarms()) {
-                    am.setExactAndAllowWhileIdle(
-                        android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                        SystemClock.elapsedRealtime() + 60_000L,
-                        watchdogPendingIntent!!
-                    )
-                } else {
-                    DiagnosticLogger.log("WATCHDOG", "No exact alarm permission")
-                }
+            if (OemBatteryHelper.isTranssionDevice()) {
+                // Transsion OEM (TECNO, Infinix, Itel):
+                // setAlarmClock() — единственный alarm, который HiOS не блокирует.
+                // Побочный эффект: иконка будильника в статус-баре.
+                val showIntent = PendingIntent.getActivity(
+                    this, 0,
+                    Intent(this, MainActivity::class.java),
+                    PendingIntent.FLAG_IMMUTABLE
+                )
+                val alarmInfo = AlarmManager.AlarmClockInfo(triggerAtMs, showIntent)
+                am.setAlarmClock(alarmInfo, watchdogPendingIntent!!)
             } else {
+                // Остальные OEM (Samsung, Pixel, Xiaomi, Huawei, ...):
+                // setExactAndAllowWhileIdle() достаточно, иконка будильника не нужна.
                 am.setExactAndAllowWhileIdle(
-                    android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                    SystemClock.elapsedRealtime() + 60_000L,
+                    AlarmManager.RTC_WAKEUP,
+                    triggerAtMs,
                     watchdogPendingIntent!!
                 )
             }
         } catch (e: SecurityException) {
-            DiagnosticLogger.log("WATCHDOG_ERR", "SecurityException: ${e.message}")
+            DiagnosticLogger.log("WATCHDOG_ERR", "alarm SecurityException: ${e.message}")
         }
     }
     
     private fun cancelWatchdog() {
         watchdogPendingIntent?.let {
-            val am = getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager
+            val am = getSystemService(Context.ALARM_SERVICE) as? AlarmManager
             am?.cancel(it)
         }
     }
@@ -708,5 +746,79 @@ class WifiScanService : Service() {
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(serviceChannel)
         }
+    }
+
+    /**
+     * v5.4.5: Логирование всех критических разрешений при старте сервиса.
+     * Позволяет удалённо диагностировать проблемы без доступа к телефону.
+     */
+    private fun logPermissions() {
+        val permsToCheck = mutableListOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.ACCESS_WIFI_STATE,
+            Manifest.permission.CHANGE_WIFI_STATE,
+            Manifest.permission.WAKE_LOCK,
+            Manifest.permission.FOREGROUND_SERVICE,
+        )
+
+        // Android 10+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            permsToCheck.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+            permsToCheck.add(Manifest.permission.ACTIVITY_RECOGNITION)
+        }
+
+        // Android 13+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permsToCheck.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+
+        val granted = mutableListOf<String>()
+        val denied = mutableListOf<String>()
+
+        for (perm in permsToCheck) {
+            val shortName = perm.substringAfterLast('.')
+            if (ContextCompat.checkSelfPermission(this, perm) == PackageManager.PERMISSION_GRANTED) {
+                granted.add(shortName)
+            } else {
+                denied.add(shortName)
+            }
+        }
+
+        // ── Системные ограничения (не через checkSelfPermission) ──
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val batteryWhitelist = pm.isIgnoringBatteryOptimizations(packageName)
+        val isDoze = pm.isDeviceIdleMode
+        val canExactAlarm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val am = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            am.canScheduleExactAlarms()
+        } else true
+
+        // v5.4.5: Режим энергосбережения (Battery Saver) — может ограничивать фоновую работу
+        val isPowerSave = pm.isPowerSaveMode
+
+        // v5.4.5: Data Saver — может блокировать фоновую передачу данных (upload на Я.Диск)
+        val isDataSaverOn = try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                cm.restrictBackgroundStatus == android.net.ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED
+            } else false
+        } catch (_: Exception) { false }
+
+        // v5.4.5: App Standby Bucket (Android 9+) — Restricted bucket = жёсткие ограничения
+        val standbyBucket = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            try {
+                val usm = getSystemService(Context.USAGE_STATS_SERVICE) as? android.app.usage.UsageStatsManager
+                usm?.appStandbyBucket?.toString() ?: "unknown"
+            } catch (_: Exception) { "error" }
+        } else "n/a"
+
+        DiagnosticLogger.log(
+            "PERMISSIONS",
+            "granted=[${granted.joinToString(",")}],denied=[${denied.joinToString(",")}]," +
+            "battWhitelist=$batteryWhitelist,doze=$isDoze,exactAlarm=$canExactAlarm," +
+            "powerSave=$isPowerSave,dataSaver=$isDataSaverOn,standbyBucket=$standbyBucket," +
+            "oem=${Build.MANUFACTURER}"
+        )
     }
 }

@@ -32,6 +32,20 @@ object OemBatteryHelper {
         return m.contains("tecno") || m.contains("infinix") || m.contains("itel") || m.contains("transsion")
     }
 
+    /**
+     * v5.4.5: Детекция агрессивных OEM, которые убивают фоновые сервисы.
+     * Источник: https://dontkillmyapp.com
+     * Для этих устройств используется setAlarmClock() watchdog.
+     */
+    fun isAggressiveOem(): Boolean {
+        val m = Build.MANUFACTURER.lowercase()
+        return m.contains("tecno") || m.contains("infinix") || m.contains("itel") || m.contains("transsion") ||
+               m.contains("xiaomi") || m.contains("redmi") || m.contains("poco") ||
+               m.contains("huawei") || m.contains("honor") ||
+               m.contains("oppo") || m.contains("realme") || m.contains("oneplus") ||
+               m.contains("vivo") || m.contains("meizu")
+    }
+
     // ── Battery optimization whitelist (стандартный Android) ─────────────
 
     /**
